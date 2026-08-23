@@ -53,15 +53,19 @@ sides speak the lower version.
 The loader owns renewal; the app cannot renew (its `fetchAccessToken` is partner code
 living in the partner's page).
 
-1. Loader schedules renewal at **80% of remaining life**, computed from the
-   `expiresAt` the partner's server returned — never from decoding the JWT,
-   never a fixed offset (fixed timers fire late under client clock skew).
+1. Loader schedules renewal at **80% of remaining life** — this number is loader
+   policy owned by this document, deliberately absent from the public contract so
+   it can change (jitter, a different fraction) without a breaking release.
+   Computed from the `expiresAt` the partner's server returned: never from
+   decoding the JWT, never a fixed offset (fixed timers fire late under client
+   clock skew).
 2. On fire, loader calls `fetchAccessToken()` and posts `token` in.
 3. Reactive backstop: app hits a 401 (throttled timers in backgrounded tabs),
    posts `token-request`, loader renews on demand.
-4. If `fetchAccessToken` fails with a 401 from the partner's own route, renewal
-   is impossible by design — the loader raises `onAuthError({ type: 'partner_session_expired' })`
-   and stops retrying. doola cannot log a user back in to someone else's product.
+4. If `fetchAccessToken` fails with a 401 from the partner's own route, the loader
+   raises `onAuthError({ type: 'partner_session_expired' })` and stops retrying —
+   semantics and the partner's expected response are owned by the contract
+   (see `DoolaAuthError`).
 
 ## Sessions never touch storage
 

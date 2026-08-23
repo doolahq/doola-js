@@ -8,8 +8,8 @@ your code.
 
 ## How it works
 
-This package is deliberately small. It injects the doola loader from
-`js.doola.com/v1/doola.js`, which mounts an iframe served from `sdk.doola.com`.
+This package is deliberately small. It injects doola's versioned loader from
+`js.doola.com`, which mounts an iframe served from `sdk.doola.com`.
 Every screen, field, and validation lives inside that iframe on doola's origin:
 
 - **Your page never sees the data.** SSNs, ITINs, and signatures are typed into a
@@ -77,7 +77,7 @@ Branding — your logo, colors, and typography — is configured once in the
 
 ## Repository layout
 
-- [`packages/js/src/index.ts`](./packages/js/src/index.ts) — the public contract. Changes here are public-API changes.
+- [`packages/js/src/index.d.ts`](./packages/js/src/index.d.ts) — the public contract (surface rules in [CONTRIBUTING.md](./CONTRIBUTING.md)).
 - [`docs/protocol.md`](./docs/protocol.md) — the loader ↔ iframe protocol (internal, versioned).
 - [`docs/errors.md`](./docs/errors.md) — error taxonomy.
 

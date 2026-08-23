@@ -1,14 +1,12 @@
 /**
  * @doola/js — public contract for the doola embedded SDK.
  *
- * This file is the API partners program against. Once a partner ships,
- * every exported name here is effectively permanent: the loader at
- * js.doola.com/v1/doola.js must honor this contract indefinitely.
- * Review changes to this file as public-API changes, not as code.
+ * Every exported name here is effectively permanent once partners ship
+ * against it — see CONTRIBUTING.md for the contract-surface rules.
  *
- * What this package is NOT: it contains no UI and no loader logic.
- * The npm package injects the loader script; the loader creates an
- * iframe against sdk.doola.com; every screen lives inside that iframe.
+ * This package contains no UI and no loader logic: it injects doola's
+ * versioned loader, which mounts an iframe against sdk.doola.com where
+ * every screen lives.
  */
 
 /**
@@ -16,10 +14,9 @@
  * the partner's server via POST /v1/partner/customer-sessions.
  *
  * This is the broker response passed through verbatim. `expiresAt` is
- * required because the loader schedules proactive renewal at 80% of the
- * token's remaining life — off the server's clock, never by decoding the
- * JWT and never with a fixed timer, which fires late under client clock
- * skew.
+ * required: the loader uses it to renew the session proactively before
+ * expiry. Renewal mechanics are specified in docs/protocol.md and are
+ * not part of this contract.
  */
 export interface CustomerSession {
   /** The `cs_<env>_…` token. Held in memory; never persisted by the loader. */
@@ -113,10 +110,7 @@ export interface DoolaOptions {
 
   fetchAccessToken: FetchAccessToken;
 
-  /**
-   * MUST be handled. Called when a session cannot be established or
-   * renewed; for `partner_session_expired`, send the user to your login.
-   */
+  /** MUST be handled — see {@link DoolaAuthError} for each case and the expected response. */
   onAuthError: (error: DoolaAuthError) => void;
 
   appearance?: Appearance;
@@ -129,8 +123,17 @@ export interface DoolaOptions {
 /** Components available in v1. The formation component includes the post-purchase mini-dashboard. */
 export type DoolaComponentType = 'formation';
 
+/** Lifecycle callbacks shared by every component type. */
+export interface ComponentOptions {
+  /** Fired the first time any UI (including a loading state) is visible. */
+  onLoaderStart?: (event: { componentType: DoolaComponentType }) => void;
+
+  /** Fired when the component fails to load. May fire more than once; handlers must be idempotent. */
+  onLoadError?: (error: DoolaLoadError) => void;
+}
+
 /** Options for `create('formation')`. */
-export interface FormationOptions {
+export interface FormationOptions extends ComponentOptions {
   /**
    * The payment handoff. Fires when the customer completes the wizard
    * and the draft formation is submitted; the company is parked at
@@ -143,12 +146,6 @@ export interface FormationOptions {
    * GET /v1/partner/companies/{companyId}.
    */
   onFormed: (event: { companyId: string }) => void;
-
-  /** Fired the first time any UI (including a loading state) is visible. */
-  onLoaderStart?: (event: { componentType: DoolaComponentType }) => void;
-
-  /** Fired when the component fails to load. May fire more than once; handlers must be idempotent. */
-  onLoadError?: (error: DoolaLoadError) => void;
 }
 
 /**
@@ -156,6 +153,9 @@ export interface FormationOptions {
  * custom element: append it to the DOM to mount, remove it to unmount.
  * It behaves as a block element — 100% of the parent's width, height
  * driven by content via the loader's resize negotiation.
+ *
+ * Deliberately an interface, not a type alias: methods on the handle can
+ * be added additively in later minors without renaming the public type.
  */
 export interface DoolaComponent extends HTMLElement {}
 

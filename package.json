@@ -8,12 +8,10 @@
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "changeset": "changeset"
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
-    "prettier": "^3.4.0",
-    "typescript": "^5.7.0"
+    "prettier": "^3.4.0"
   }
 }
