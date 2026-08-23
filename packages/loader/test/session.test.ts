@@ -23,12 +23,23 @@ describe('SessionManager', () => {
     expect(a).toBe(b);
   });
 
-  it('renews proactively at 80% of remaining life and broadcasts the new session', async () => {
+  it('does not start a renewal loop while nothing is mounted', async () => {
+    const fetch = vi.fn().mockResolvedValue(session(TEN_MINUTES));
+    const manager = new SessionManager(fetch, vi.fn(), vi.fn());
+
+    await manager.current();
+    await vi.advanceTimersByTimeAsync(TEN_MINUTES * 3);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('renews proactively at 80% of remaining life once resumed, and broadcasts', async () => {
     const fetch = vi.fn().mockResolvedValue(session(TEN_MINUTES));
     const onSession = vi.fn();
     const manager = new SessionManager(fetch, vi.fn(), onSession);
 
     await manager.current();
+    manager.resume();
     expect(fetch).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(TEN_MINUTES * 0.8 - 1_000);
@@ -39,11 +50,26 @@ describe('SessionManager', () => {
     expect(onSession).toHaveBeenCalledTimes(2);
   });
 
+  it('pause() stops renewing; resume() with a stale session re-mints', async () => {
+    const fetch = vi.fn().mockResolvedValue(session(TEN_MINUTES));
+    const manager = new SessionManager(fetch, vi.fn(), vi.fn());
+
+    await manager.current();
+    manager.resume();
+    manager.pause();
+    await vi.advanceTimersByTimeAsync(TEN_MINUTES * 2);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    manager.resume();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('never schedules a zero-delay renewal loop for an already-stale expiresAt', async () => {
     const fetch = vi.fn().mockResolvedValue(session(-1_000));
     const manager = new SessionManager(fetch, vi.fn(), vi.fn());
 
-    await manager.current();
+    manager.resume();
     await vi.advanceTimersByTimeAsync(4_999);
 
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -72,6 +98,7 @@ describe('SessionManager', () => {
     const manager = new SessionManager(fetch, onAuthError, vi.fn());
 
     await manager.current();
+    manager.resume();
     await vi.advanceTimersByTimeAsync(TEN_MINUTES);
 
     expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type: 'renewal_failed' }));
@@ -90,6 +117,7 @@ describe('SessionManager', () => {
     const manager = new SessionManager(fetch, vi.fn(), vi.fn());
 
     await manager.current();
+    manager.resume();
     manager.stop();
     await vi.advanceTimersByTimeAsync(TEN_MINUTES * 2);
 

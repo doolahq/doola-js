@@ -1,69 +1,119 @@
-import type { Appearance, FormationOptions } from '@doola/js';
+import type { Appearance, ComponentOptions, DoolaComponentType } from '@doola/js';
 
 import type { Env } from './env';
-import { envelope, parseAppMessage, PROTOCOL_VERSION, type LoaderMessage } from './protocol';
+import {
+  envelope,
+  parseAppMessage,
+  PROTOCOL_VERSION,
+  type AppMessage,
+  type LoaderMessage,
+} from './protocol';
 import type { SessionManager } from './session';
 
-const ELEMENT_TAG = 'doola-formation';
+const INLINE_FRAME_CSS = 'width:100%;border:0;display:block;height:0;';
+const FULLSCREEN_FRAME_CSS =
+  'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;';
 
-const DEFAULT_FULLSCREEN_BREAKPOINT = 640;
+/** Per-mount state shared by init() and every controller it creates. */
+export interface InstanceState {
+  appearance?: Appearance | undefined;
+  locale?: string | undefined;
+}
 
 export interface FrameConfig {
   env: Env;
   publishableKey: string;
+  componentType: DoolaComponentType;
   sessions: SessionManager;
-  appearance: () => Appearance | undefined;
-  locale: () => string | undefined;
+  state: InstanceState;
   presentationMode: 'inline' | 'fullScreen' | 'auto';
-  fullScreenBreakpoint: number | undefined;
+  fullScreenBreakpoint: number;
+  /** Instance-level auth handler; app-reported auth errors forward here (docs/protocol.md). */
+  onAuthError: (error: {
+    type: 'partner_session_expired' | 'mint_failed' | 'renewal_failed';
+    message: string;
+  }) => void;
+  /** Per-component-type outcome messages (e.g. formation's `formed`). */
+  onComponentMessage: (message: AppMessage) => void;
+  onConnect: (controller: FrameController) => void;
+  onDisconnect: (controller: FrameController) => void;
+}
+
+/**
+ * One shared window listener for all mounted frames, dispatched by
+ * event.source. Keeps message handling O(1) in the number of mounted
+ * components and independent of other iframes' postMessage traffic.
+ */
+const controllersBySource = new Map<MessageEventSource, FrameController>();
+
+function dispatch(event: MessageEvent): void {
+  const source = event.source;
+  if (!source) return;
+
+  const controller = controllersBySource.get(source);
+  if (!controller) return;
+
+  controller.handleMessage(event);
+}
+
+function register(source: MessageEventSource, controller: FrameController): void {
+  if (controllersBySource.size === 0) window.addEventListener('message', dispatch);
+  controllersBySource.set(source, controller);
+}
+
+function deregister(source: MessageEventSource | null): void {
+  if (source) controllersBySource.delete(source);
+  if (controllersBySource.size === 0) window.removeEventListener('message', dispatch);
 }
 
 /**
  * One mounted component: the custom element, its iframe, and the message
- * wiring. Mounts on connect, tears down on disconnect — standard custom
- * element lifecycle, which is what lets React/Vue portals and plain DOM
- * all treat it as an ordinary block element.
+ * wiring. Component-type-generic — the type appears only in the iframe
+ * path and the outcome messages, both injected via FrameConfig, so a
+ * second component type is additive here.
  */
 export class FrameController {
   private iframe: HTMLIFrameElement | null = null;
   private fullScreenQuery: MediaQueryList | null = null;
   private restoreStyles: (() => void) | null = null;
-  private readonly onMessage = (event: MessageEvent) => this.handleMessage(event);
   private readonly onMediaChange = () => this.applyPresentation();
 
   constructor(
     private readonly host: HTMLElement,
     private readonly config: FrameConfig,
-    private readonly options: FormationOptions,
+    private readonly options: ComponentOptions,
   ) {}
 
   connect(): void {
     const iframe = document.createElement('iframe');
 
-    iframe.src = `${this.config.env.sdkOrigin}/formation?pk=${encodeURIComponent(this.config.publishableKey)}`;
+    iframe.src = `${this.config.env.sdkOrigin}/${this.config.componentType}?pk=${encodeURIComponent(this.config.publishableKey)}`;
     iframe.title = 'doola';
     iframe.allow = 'clipboard-write';
-    iframe.style.cssText = 'width:100%;border:0;display:block;height:0;';
+    iframe.style.cssText = INLINE_FRAME_CSS;
 
     this.iframe = iframe;
     this.host.appendChild(iframe);
-    window.addEventListener('message', this.onMessage);
+    if (iframe.contentWindow) register(iframe.contentWindow, this);
 
     if (this.config.presentationMode === 'auto') {
-      const breakpoint = this.config.fullScreenBreakpoint ?? DEFAULT_FULLSCREEN_BREAKPOINT;
-      this.fullScreenQuery = window.matchMedia(`(max-width: ${breakpoint}px)`);
+      this.fullScreenQuery = window.matchMedia(
+        `(max-width: ${this.config.fullScreenBreakpoint}px)`,
+      );
       this.fullScreenQuery.addEventListener('change', this.onMediaChange);
     }
     this.applyPresentation();
+    this.config.onConnect(this);
   }
 
   disconnect(): void {
-    window.removeEventListener('message', this.onMessage);
+    deregister(this.iframe?.contentWindow ?? null);
     this.fullScreenQuery?.removeEventListener('change', this.onMediaChange);
     this.restoreStyles?.();
 
     this.iframe?.remove();
     this.iframe = null;
+    this.config.onDisconnect(this);
   }
 
   post(message: LoaderMessage): void {
@@ -71,11 +121,11 @@ export class FrameController {
     this.iframe?.contentWindow?.postMessage(envelope(message), this.config.env.sdkOrigin);
   }
 
-  private handleMessage(event: MessageEvent): void {
-    // Both checks, always: right origin AND right window. Another doola
-    // frame on the same page passes the origin check alone.
+  handleMessage(event: MessageEvent): void {
+    // Both checks, always: right origin AND right window. The source map
+    // already matched the window; the origin check stops a hijacked or
+    // navigated frame from speaking as a doola one.
     if (event.origin !== this.config.env.sdkOrigin) return;
-    if (!this.iframe || event.source !== this.iframe.contentWindow) return;
 
     const message = parseAppMessage(event.data);
     if (!message) return;
@@ -88,14 +138,15 @@ export class FrameController {
             payload: {
               session,
               protocol: Math.min(PROTOCOL_VERSION, message.payload.protocolMax),
-              appearance: this.config.appearance(),
-              locale: this.config.locale(),
+              appearance: this.config.state.appearance,
+              locale: this.config.state.locale,
             },
           }),
         );
         break;
       case 'resize':
-        if (this.iframe) this.iframe.style.height = `${message.payload.height}px`;
+        if (this.iframe && !this.restoreStyles)
+          this.iframe.style.height = `${message.payload.height}px`;
         break;
       case 'scroll-request': {
         const top = this.iframe
@@ -107,8 +158,8 @@ export class FrameController {
       case 'token-request':
         this.config.sessions.renewNow();
         break;
-      case 'formed':
-        this.options.onFormed({ companyId: message.payload.companyId });
+      case 'auth-error':
+        this.config.onAuthError(message.payload);
         break;
       case 'loader-start':
         this.options.onLoaderStart?.(message.payload);
@@ -116,10 +167,8 @@ export class FrameController {
       case 'load-error':
         this.options.onLoadError?.(message.payload);
         break;
-      case 'auth-error':
-        // Surfaced through the instance-level handler by the app only for
-        // states the loader can't observe itself; forwarded in doola.ts.
-        break;
+      default:
+        this.config.onComponentMessage(message);
     }
   }
 
@@ -133,12 +182,11 @@ export class FrameController {
       if (!iframe) return;
 
       const previousOverflow = document.documentElement.style.overflow;
-      iframe.style.cssText =
-        'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;';
+      iframe.style.cssText = FULLSCREEN_FRAME_CSS;
       document.documentElement.style.overflow = 'hidden';
 
       this.restoreStyles = () => {
-        iframe.style.cssText = 'width:100%;border:0;display:block;height:0;';
+        iframe.style.cssText = INLINE_FRAME_CSS;
         document.documentElement.style.overflow = previousOverflow;
         this.restoreStyles = null;
       };
@@ -150,8 +198,8 @@ export class FrameController {
   }
 }
 
-/** Registered once; instances receive their controller just before mount. */
-export class DoolaFormationElement extends HTMLElement {
+/** Generic host element; the per-type tag comes from the component registry. */
+export class DoolaElement extends HTMLElement {
   controller: FrameController | null = null;
 
   connectedCallback(): void {
@@ -164,6 +212,12 @@ export class DoolaFormationElement extends HTMLElement {
   }
 }
 
-export function defineElementOnce(): void {
-  if (!customElements.get(ELEMENT_TAG)) customElements.define(ELEMENT_TAG, DoolaFormationElement);
+export const ELEMENT_TAGS: Record<DoolaComponentType, string> = {
+  formation: 'doola-formation',
+};
+
+export function defineElementsOnce(): void {
+  for (const tag of Object.values(ELEMENT_TAGS)) {
+    if (!customElements.get(tag)) customElements.define(tag, DoolaElement);
+  }
 }

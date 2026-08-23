@@ -52,7 +52,12 @@ import { loadDoola } from '@doola/js';
 
 const doola = await loadDoola({
   publishableKey: 'pk_live_…',
-  fetchAccessToken: async () => (await fetch('/doola-session', { method: 'POST' })).json(),
+  fetchAccessToken: async () => {
+    const r = await fetch('/doola-session', { method: 'POST' });
+    if (!r.ok) throw r; // a 401 here means "log back in" — the loader raises onAuthError
+
+    return r.json();
+  },
   onAuthError: (e) => {
     if (e.type === 'partner_session_expired') location.href = '/login';
   },

@@ -5,7 +5,8 @@ import { envelope, parseAppMessage, PROTOCOL_VERSION } from '../src/protocol';
 describe('parseAppMessage', () => {
   it('accepts a well-formed message at the current version', () => {
     const msg = parseAppMessage({ v: PROTOCOL_VERSION, type: 'resize', payload: { height: 640 } });
-    expect(msg).toEqual({ type: 'resize', payload: { height: 640 } });
+    expect(msg?.type).toBe('resize');
+    expect(msg?.payload).toEqual({ height: 640 });
   });
 
   it('rejects a message from a future protocol version', () => {

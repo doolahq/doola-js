@@ -34,6 +34,12 @@ export interface CustomerSession {
  * takes `fetchClientSecret` as a function: renewal re-enters the
  * partner's backend, which re-checks its own user session. A doola
  * session can never outlive the partner login that created it.
+ *
+ * Rejection convention: when your route answers 401 (the user's session
+ * with YOU has expired), reject with an object exposing `status: 401` —
+ * throwing the fetch `Response` satisfies this. That is what lets the
+ * loader classify the failure as `partner_session_expired` instead of a
+ * generic error. Any other rejection is treated as transient.
  */
 export type FetchAccessToken = () => Promise<CustomerSession>;
 

@@ -9,7 +9,12 @@ export type * from './types';
  */
 const LOADER_URL = 'https://js.doola.com/v1/doola.js';
 
-interface DoolaGlobal {
+/**
+ * The shim <-> loader handshake: the loader assigns this to
+ * `window.Doola`. Declared once, here — the loader implements it via
+ * this package's global augmentation rather than re-declaring it.
+ */
+export interface DoolaGlobal {
   init(options: DoolaOptions): Doola;
 }
 

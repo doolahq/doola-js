@@ -40,13 +40,9 @@ export type LoaderMessage =
     }
   | { type: 'presentation'; payload: { mode: 'inline' | 'fullScreen' } };
 
-export interface Envelope<M> {
-  v: number;
-  type: M extends { type: infer T } ? T : never;
-  payload: unknown;
-}
+export type Envelope = LoaderMessage & { v: number };
 
-/** Parse an inbound message; null for anything malformed or from another protocol. */
+/** Parse an inbound message; null for anything malformed or from a future protocol. */
 export function parseAppMessage(data: unknown): AppMessage | null {
   if (typeof data !== 'object' || data === null) return null;
 
@@ -54,13 +50,9 @@ export function parseAppMessage(data: unknown): AppMessage | null {
   if (typeof v !== 'number' || v > PROTOCOL_VERSION) return null;
   if (typeof type !== 'string' || typeof payload !== 'object' || payload === null) return null;
 
-  return { type, payload } as AppMessage;
+  return data as AppMessage;
 }
 
-export function envelope(message: LoaderMessage): Envelope<LoaderMessage> {
-  return {
-    v: PROTOCOL_VERSION,
-    type: message.type,
-    payload: message.payload,
-  } as Envelope<LoaderMessage>;
+export function envelope(message: LoaderMessage): Envelope {
+  return { v: PROTOCOL_VERSION, ...message };
 }

@@ -10,11 +10,11 @@ contract wins and this file has the bug.
 
 ## Auth errors → `onAuthError` (init-level)
 
-| type                      | meaning                                                                                                   | partner's correct response                                                                             |
-| ------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `partner_session_expired` | Their own user session died; their token route returned 401. Renewal cannot succeed.                      | Redirect to their login. Retrying is pointless.                                                        |
-| `mint_failed`             | First token fetch failed (network, 5xx from their route, malformed response).                             | Retry / surface their own error state.                                                                 |
-| `renewal_failed`          | A mid-session renewal failed for a non-401 reason. The app keeps working until the current token expires. | Usually nothing; escalates to `partner_session_expired` semantics if their route starts returning 401. |
+| type                      | meaning                                                                                                                                                                                              | partner's correct response                                                                             |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `partner_session_expired` | Their own user session died; their token route returned 401 and `fetchAccessToken` rejected with an object exposing `status: 401` (throwing the fetch `Response` does this). Renewal cannot succeed. | Redirect to their login. Retrying is pointless.                                                        |
+| `mint_failed`             | First token fetch failed (network, 5xx from their route, malformed response).                                                                                                                        | Retry / surface their own error state.                                                                 |
+| `renewal_failed`          | A mid-session renewal failed for a non-401 reason. The app keeps working until the current token expires.                                                                                            | Usually nothing; escalates to `partner_session_expired` semantics if their route starts returning 401. |
 
 ## Load errors → `onLoadError` (component-level)
 
