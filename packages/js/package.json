@@ -1,0 +1,20 @@
+{
+  "name": "@doola/js",
+  "version": "0.0.0",
+  "description": "Loader and TypeScript types for embedding doola formation in your product.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/doolahq/doola-js.git",
+    "directory": "packages/js"
+  },
+  "type": "module",
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
