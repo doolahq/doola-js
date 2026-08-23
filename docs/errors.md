@@ -3,7 +3,7 @@
 Two disjoint families, matching the two failure surfaces a partner can observe.
 
 The type unions and per-case meaning in
-[`packages/js/src/index.d.ts`](../packages/js/src/index.d.ts) are canonical —
+[`packages/js/src/types.d.ts`](../packages/js/src/types.d.ts) are canonical —
 that file ships in the npm package and is what partners see in their IDE. This
 document is the response playbook layered on top; when they disagree, the
 contract wins and this file has the bug.

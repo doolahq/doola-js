@@ -7,7 +7,7 @@ bugs and documentation; API surface changes are driven by the doola team.
 
 This section is the canonical definition; everything else in the repo points here.
 
-- **Public contract:** `packages/js/src/index.d.ts` and `docs/errors.md`. Once
+- **Public contract:** `packages/js/src/types.d.ts` (re-exported by `@doola/js`) and `docs/errors.md`. Once
   partners ship against them, every exported name and documented semantic is
   effectively permanent. Review any change as a public-API change: additive is
   fine, breaking requires a major and a migration note, and removals

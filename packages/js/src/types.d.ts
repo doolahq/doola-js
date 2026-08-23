@@ -172,10 +172,3 @@ export interface Doola {
    */
   destroy(): void;
 }
-
-/**
- * Injects the loader script from js.doola.com/v1/doola.js (if not
- * already present) and initializes it. Resolves once the loader is
- * ready to create components. Call once per page; reuse the instance.
- */
-export declare function loadDoola(options: DoolaOptions): Promise<Doola>;
