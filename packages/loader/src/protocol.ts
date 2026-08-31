@@ -1,10 +1,4 @@
-import type {
-  Appearance,
-  CustomerSession,
-  DoolaAuthError,
-  DoolaComponentType,
-  DoolaLoadError,
-} from '@doola/js';
+import type { Appearance, CustomerSession, DoolaAuthError, DoolaLoadError } from '@doola/js';
 
 /**
  * The loader <-> iframe protocol. Spec: docs/protocol.md. The two sides
@@ -21,7 +15,7 @@ export type AppMessage =
   | { type: 'formed'; payload: { companyId: string } }
   | { type: 'auth-error'; payload: DoolaAuthError }
   | { type: 'load-error'; payload: DoolaLoadError }
-  | { type: 'loader-start'; payload: { componentType: DoolaComponentType } };
+  | { type: 'loader-start'; payload: Record<string, never> };
 
 export type LoaderMessage =
   | {

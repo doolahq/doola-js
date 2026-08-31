@@ -65,7 +65,9 @@ function injectLoader(): Promise<DoolaGlobal> {
 /**
  * Injects the loader from js.doola.com (if not already present) and
  * initializes it. Resolves once the loader is ready to create
- * components. Call once per page; reuse the instance.
+ * components. One live instance per page: reuse it across mounts, and
+ * call again only after destroy() — the script itself is never
+ * re-injected.
  */
 export async function loadDoola(options: DoolaOptions): Promise<Doola> {
   const loader = await injectLoader();

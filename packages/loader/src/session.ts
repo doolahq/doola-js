@@ -1,24 +1,34 @@
 import type { CustomerSession, DoolaAuthError, FetchAccessToken } from '@doola/js';
 
 /**
- * Renew at this fraction of the token's remaining life. Loader policy,
+ * Renew at this fraction of the token's lifetime. Loader policy,
  * deliberately not part of the public contract (docs/protocol.md).
  */
 const RENEWAL_FRACTION = 0.8;
 
-/** Floor so a short-lived or clock-skewed token can't schedule a zero-delay renewal loop. */
+/** Floor so a short-lived or already-stale token can't schedule a zero-delay renewal loop. */
 const MIN_RENEWAL_DELAY_MS = 5_000;
 
 /** Treat a session this close to expiry as stale when resuming. */
 const STALENESS_MARGIN_MS = 30_000;
 
-function isPartnerSessionExpired(error: unknown): boolean {
-  // The public contract (FetchAccessToken docs) asks partners to reject
-  // with an object exposing `status: 401` — throwing the fetch Response
-  // satisfies it. This is the implementer of that published rule.
-  return (
-    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 401
-  );
+/**
+ * The status→type mapping the loader owns (docs/protocol.md). The public
+ * contract (FetchAccessToken docs) asks partners to reject with an object
+ * exposing the HTTP `status` — throwing the fetch Response satisfies it.
+ * This is the implementer of that published rule.
+ */
+function classifyRejection(
+  error: unknown,
+  fallback: DoolaAuthError['type'],
+): DoolaAuthError['type'] {
+  const status =
+    typeof error === 'object' && error !== null ? (error as { status?: unknown }).status : null;
+
+  if (status === 401) return 'partner_session_expired';
+  if (status === 409) return 'email_in_use';
+
+  return fallback;
 }
 
 /**
@@ -27,12 +37,18 @@ function isPartnerSessionExpired(error: unknown): boolean {
  * living in the partner's page — so renewal always happens here and the
  * fresh token is broadcast into every mounted frame.
  *
+ * All expiry arithmetic is `expiresIn` relative to the local receipt
+ * time — one clock, so client clock skew cannot mistime a renewal
+ * (docs/protocol.md, "Token renewal").
+ *
  * Renewal only runs while frames are mounted: pause() on last
  * disconnect stops the timer so an idle page never mints tokens nobody
  * consumes; resume() re-mints on next mount if the session went stale.
  */
 export class SessionManager {
   private session: CustomerSession | null = null;
+  /** Local-clock ms when the current session arrived. */
+  private receivedAt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private pending: Promise<CustomerSession> | null = null;
   // Starts paused: the warm-start mint must not begin a renewal loop on a
@@ -48,7 +64,7 @@ export class SessionManager {
 
   /** The current session, minting or re-minting if absent or stale. */
   current(): Promise<CustomerSession> {
-    if (this.session && !this.isStale(this.session)) return Promise.resolve(this.session);
+    if (this.session && !this.isStale()) return Promise.resolve(this.session);
 
     return this.refresh('mint_failed');
   }
@@ -73,7 +89,7 @@ export class SessionManager {
   resume(): void {
     this.paused = false;
 
-    if (this.session && !this.isStale(this.session)) this.schedule(this.session.expiresAt);
+    if (this.session && !this.isStale()) this.schedule();
     else this.renewNow();
   }
 
@@ -83,8 +99,12 @@ export class SessionManager {
     this.session = null;
   }
 
-  private isStale(session: CustomerSession): boolean {
-    return new Date(session.expiresAt).getTime() - Date.now() < STALENESS_MARGIN_MS;
+  private ttlMs(): number {
+    return (this.session?.expiresIn ?? 0) * 1_000;
+  }
+
+  private isStale(): boolean {
+    return Date.now() - this.receivedAt > this.ttlMs() - STALENESS_MARGIN_MS;
   }
 
   private refresh(failureType: DoolaAuthError['type']): Promise<CustomerSession> {
@@ -96,7 +116,8 @@ export class SessionManager {
         if (this.stopped) return session;
 
         this.session = session;
-        if (!this.paused) this.schedule(session.expiresAt);
+        this.receivedAt = Date.now();
+        if (!this.paused) this.schedule();
         this.onSession(session);
 
         return session;
@@ -104,7 +125,7 @@ export class SessionManager {
       .catch((error: unknown) => {
         this.pending = null;
 
-        const type = isPartnerSessionExpired(error) ? 'partner_session_expired' : failureType;
+        const type = classifyRejection(error, failureType);
         this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
 
         throw error;
@@ -113,12 +134,16 @@ export class SessionManager {
     return pending;
   }
 
-  private schedule(expiresAt: string): void {
+  /**
+   * Fire at receivedAt + 80% of the lifetime. At receipt that is a plain
+   * relative timer; on a mid-life resume it is the remainder of the same
+   * point, so pause/resume never renews earlier or later than planned.
+   */
+  private schedule(): void {
     if (this.timer) clearTimeout(this.timer);
 
-    const remaining = new Date(expiresAt).getTime() - Date.now();
-    const delay = Math.max(remaining * RENEWAL_FRACTION, MIN_RENEWAL_DELAY_MS);
+    const delay = this.receivedAt + this.ttlMs() * RENEWAL_FRACTION - Date.now();
 
-    this.timer = setTimeout(() => this.renewNow(), delay);
+    this.timer = setTimeout(() => this.renewNow(), Math.max(delay, MIN_RENEWAL_DELAY_MS));
   }
 }

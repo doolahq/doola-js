@@ -37,7 +37,7 @@ describe('parseAppMessage', () => {
     expect(
       envelope({
         type: 'token',
-        payload: { session: { accessToken: 'cs_test_x', expiresAt: 'now' } },
+        payload: { session: { accessToken: 'cs_test_x', expiresIn: 600 } },
       }).v,
     ).toBe(PROTOCOL_VERSION);
   });

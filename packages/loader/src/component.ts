@@ -1,40 +1,34 @@
-import type { Appearance, ComponentOptions, DoolaComponentType } from '@doola/js';
+import type { Appearance, DoolaAuthError, DoolaLoadError } from '@doola/js';
 
-import type { Env } from './env';
-import {
-  envelope,
-  parseAppMessage,
-  PROTOCOL_VERSION,
-  type AppMessage,
-  type LoaderMessage,
-} from './protocol';
+import { envelope, parseAppMessage, PROTOCOL_VERSION, type LoaderMessage } from './protocol';
 import type { SessionManager } from './session';
 
 const INLINE_FRAME_CSS = 'width:100%;border:0;display:block;height:0;';
 const FULLSCREEN_FRAME_CSS =
   'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;';
 
-/** Per-mount state shared by init() and every controller it creates. */
+/** The one custom-element tag; what create() returns and partners mount. */
+export const ELEMENT_TAG = 'doola-embed';
+
+/** Per-instance state shared by init() and every controller it creates. */
 export interface InstanceState {
   appearance?: Appearance | undefined;
   locale?: string | undefined;
 }
 
 export interface FrameConfig {
-  env: Env;
+  /** Resolved for this instance: the key's environment, or the partner's CNAME origin. */
+  sdkOrigin: string;
   publishableKey: string;
-  componentType: DoolaComponentType;
   sessions: SessionManager;
   state: InstanceState;
   presentationMode: 'inline' | 'fullScreen' | 'auto';
   fullScreenBreakpoint: number;
-  /** Instance-level auth handler; app-reported auth errors forward here (docs/protocol.md). */
-  onAuthError: (error: {
-    type: 'partner_session_expired' | 'mint_failed' | 'renewal_failed';
-    message: string;
-  }) => void;
-  /** Per-component-type outcome messages (e.g. formation's `formed`). */
-  onComponentMessage: (message: AppMessage) => void;
+  /** Instance-level handlers (all passed once, at init — see the contract). */
+  onAuthError: (error: DoolaAuthError) => void;
+  onFormed: (event: { companyId: string }) => void;
+  onLoaderStart: (() => void) | undefined;
+  onLoadError: ((error: DoolaLoadError) => void) | undefined;
   onConnect: (controller: FrameController) => void;
   onDisconnect: (controller: FrameController) => void;
 }
@@ -68,9 +62,8 @@ function deregister(source: MessageEventSource | null): void {
 
 /**
  * One mounted component: the custom element, its iframe, and the message
- * wiring. Component-type-generic — the type appears only in the iframe
- * path and the outcome messages, both injected via FrameConfig, so a
- * second component type is additive here.
+ * wiring. The iframe loads the SDK origin's root — a single entry; the
+ * app decides inside which screen to show (see the contract's create()).
  */
 export class FrameController {
   private iframe: HTMLIFrameElement | null = null;
@@ -81,13 +74,12 @@ export class FrameController {
   constructor(
     private readonly host: HTMLElement,
     private readonly config: FrameConfig,
-    private readonly options: ComponentOptions,
   ) {}
 
   connect(): void {
     const iframe = document.createElement('iframe');
 
-    iframe.src = `${this.config.env.sdkOrigin}/${this.config.componentType}?pk=${encodeURIComponent(this.config.publishableKey)}`;
+    iframe.src = `${this.config.sdkOrigin}/?pk=${encodeURIComponent(this.config.publishableKey)}`;
     iframe.title = 'doola';
     iframe.allow = 'clipboard-write';
     iframe.style.cssText = INLINE_FRAME_CSS;
@@ -117,15 +109,15 @@ export class FrameController {
   }
 
   post(message: LoaderMessage): void {
-    // Target origin is always the sdk origin, never '*' — see docs/protocol.md.
-    this.iframe?.contentWindow?.postMessage(envelope(message), this.config.env.sdkOrigin);
+    // Target origin is always the SDK origin, never '*' — see docs/protocol.md.
+    this.iframe?.contentWindow?.postMessage(envelope(message), this.config.sdkOrigin);
   }
 
   handleMessage(event: MessageEvent): void {
     // Both checks, always: right origin AND right window. The source map
     // already matched the window; the origin check stops a hijacked or
     // navigated frame from speaking as a doola one.
-    if (event.origin !== this.config.env.sdkOrigin) return;
+    if (event.origin !== this.config.sdkOrigin) return;
 
     const message = parseAppMessage(event.data);
     if (!message) return;
@@ -158,17 +150,19 @@ export class FrameController {
       case 'token-request':
         this.config.sessions.renewNow();
         break;
+      case 'formed':
+        this.config.onFormed({ companyId: message.payload.companyId });
+        break;
       case 'auth-error':
         this.config.onAuthError(message.payload);
         break;
       case 'loader-start':
-        this.options.onLoaderStart?.(message.payload);
+        this.config.onLoaderStart?.();
         break;
       case 'load-error':
-        this.options.onLoadError?.(message.payload);
+        this.config.onLoadError?.(message.payload);
         break;
-      default:
-        this.config.onComponentMessage(message);
+      // Unknown types from a newer app are ignored, never an error (docs/protocol.md).
     }
   }
 
@@ -198,7 +192,7 @@ export class FrameController {
   }
 }
 
-/** Generic host element; the per-type tag comes from the component registry. */
+/** The host element behind ELEMENT_TAG; mounting is appending it to the DOM. */
 export class DoolaElement extends HTMLElement {
   controller: FrameController | null = null;
 
@@ -212,12 +206,6 @@ export class DoolaElement extends HTMLElement {
   }
 }
 
-export const ELEMENT_TAGS: Record<DoolaComponentType, string> = {
-  formation: 'doola-formation',
-};
-
-export function defineElementsOnce(): void {
-  for (const tag of Object.values(ELEMENT_TAGS)) {
-    if (!customElements.get(tag)) customElements.define(tag, DoolaElement);
-  }
+export function defineElementOnce(): void {
+  if (!customElements.get(ELEMENT_TAG)) customElements.define(ELEMENT_TAG, DoolaElement);
 }
