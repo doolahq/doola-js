@@ -11,7 +11,9 @@ This section is the canonical definition; everything else in the repo points her
   partners ship against them, every exported name and documented semantic is
   effectively permanent. Review any change as a public-API change: additive is
   fine, breaking requires a major and a migration note, and removals
-  effectively never happen.
+  effectively never happen. These rules bind from the first published release;
+  until then the surface is explicitly unstable and review may reshape it
+  without migration notes or changesets.
 - **Internal but versioned:** `docs/protocol.md`. Partners never touch it, but
   the loader and the embedded app deploy independently, so it carries its own
   version and both sides support N−1.
@@ -26,5 +28,5 @@ This section is the canonical definition; everything else in the repo points her
 
 ## What does not live here
 
-The embedded application (`sdk.doola.com`) and the loader's deployed bundle are
-built elsewhere. This repo defines the contract and ships the npm shim.
+The embedded application (served from the SDK origin) and the loader's deployed
+bundle are built elsewhere. This repo defines the contract and ships the npm shim.
