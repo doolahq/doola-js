@@ -9,7 +9,8 @@ your code.
 ## How it works
 
 This package is deliberately small. It injects doola's versioned loader from
-`js.doola.com`, which mounts an iframe served from `sdk.doola.com`.
+`js.doola.com`, which mounts an iframe served from `sdk.doola.com` — or from
+your own domain via CNAME (the `origin` option).
 Every screen, field, and validation lives inside that iframe on doola's origin:
 
 - **Your page never sees the data.** SSNs, ITINs, and signatures are typed into a
@@ -41,7 +42,12 @@ app.post('/doola-session', async (req, res) => {
     body: JSON.stringify({ email: req.user.email }),
   });
 
-  res.json(await r.json()); // { accessToken, expiresAt }
+  // pass doola's status through — never flatten a failure to 200
+  if (!r.ok) return res.status(r.status).end();
+
+  // forward exactly the fields the loader consumes, never the whole body
+  const { accessToken, expiresIn } = await r.json();
+  res.json({ accessToken, expiresIn });
 });
 ```
 
@@ -54,21 +60,21 @@ const doola = await loadDoola({
   publishableKey: 'pk_live_…',
   fetchAccessToken: async () => {
     const r = await fetch('/doola-session', { method: 'POST' });
-    if (!r.ok) throw r; // a 401 here means "log back in" — the loader raises onAuthError
-
+    if (!r.ok) throw Object.assign(new Error('doola session'), { status: r.status });
     return r.json();
   },
   onAuthError: (e) => {
     if (e.type === 'partner_session_expired') location.href = '/login';
   },
+  onFormed: ({ companyId }) => startCheckout(companyId),
 });
 
-document.querySelector('#formation').append(
-  doola.create('formation', {
-    onFormed: ({ companyId }) => startCheckout(companyId),
-  }),
-);
+// no arguments: the app decides what renders from what the session resolves to
+document.querySelector('#doola').append(doola.create());
 ```
+
+Optional but cheap: `<link rel="preconnect" href="https://sdk.doola.com" />` in your
+`<head>` lets the iframe's TLS handshake overlap the session mint.
 
 Branding — your logo, colors, and typography — is configured once in the
 [partner portal](https://portal.doola.com) and applies before first paint.
