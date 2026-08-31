@@ -1,4 +1,4 @@
-import type { Appearance, DoolaAuthError, DoolaLoadError } from '@doola/js';
+import type { DoolaOptions } from '@doola/js';
 
 import { envelope, parseAppMessage, PROTOCOL_VERSION, type LoaderMessage } from './protocol';
 import type { SessionManager } from './session';
@@ -11,24 +11,34 @@ const FULLSCREEN_FRAME_CSS =
 export const ELEMENT_TAG = 'doola-embed';
 
 /** Per-instance state shared by init() and every controller it creates. */
-export interface InstanceState {
-  appearance?: Appearance | undefined;
-  locale?: string | undefined;
-}
+export type InstanceState = Pick<DoolaOptions, 'appearance' | 'locale'>;
+
+/** The partner's handlers, typed by the contract so a contract change is a type error here. */
+export type InstanceHandlers = Pick<
+  DoolaOptions,
+  'onAuthError' | 'onFormed' | 'onLoaderStart' | 'onLoadError'
+>;
 
 export interface FrameConfig {
+  /**
+   * True once the instance is destroyed. destroy() can dispose only the
+   * controllers that are mounted at that moment; this guard covers the
+   * rest — created-but-never-mounted elements, and elements unmounted
+   * before destroy() — so a kept element cannot resurrect the instance.
+   */
+  isDestroyed: () => boolean;
   /** Resolved for this instance: the key's environment, or the partner's CNAME origin. */
   sdkOrigin: string;
   publishableKey: string;
   sessions: SessionManager;
   state: InstanceState;
-  presentationMode: 'inline' | 'fullScreen' | 'auto';
-  fullScreenBreakpoint: number;
-  /** Instance-level handlers (all passed once, at init — see the contract). */
-  onAuthError: (error: DoolaAuthError) => void;
-  onFormed: (event: { companyId: string }) => void;
-  onLoaderStart: (() => void) | undefined;
-  onLoadError: ((error: DoolaLoadError) => void) | undefined;
+  handlers: InstanceHandlers;
+  /**
+   * The instance's one shared media query; controllers subscribe, never
+   * create. Non-null only for mode `auto`, where full screen tracks the
+   * query; null means mode `fullScreen` — always on.
+   */
+  fullScreenQuery: MediaQueryList | null;
   onConnect: (controller: FrameController) => void;
   onDisconnect: (controller: FrameController) => void;
 }
@@ -67,16 +77,20 @@ function deregister(source: MessageEventSource | null): void {
  */
 export class FrameController {
   private iframe: HTMLIFrameElement | null = null;
-  private fullScreenQuery: MediaQueryList | null = null;
   private restoreStyles: (() => void) | null = null;
   private readonly onMediaChange = () => this.applyPresentation();
 
   constructor(
-    private readonly host: HTMLElement,
+    private readonly host: DoolaElement,
     private readonly config: FrameConfig,
   ) {}
 
   connect(): void {
+    if (this.config.isDestroyed()) {
+      this.host.controller = null;
+      return;
+    }
+
     const iframe = document.createElement('iframe');
 
     iframe.src = `${this.config.sdkOrigin}/?pk=${encodeURIComponent(this.config.publishableKey)}`;
@@ -88,24 +102,30 @@ export class FrameController {
     this.host.appendChild(iframe);
     if (iframe.contentWindow) register(iframe.contentWindow, this);
 
-    if (this.config.presentationMode === 'auto') {
-      this.fullScreenQuery = window.matchMedia(
-        `(max-width: ${this.config.fullScreenBreakpoint}px)`,
-      );
-      this.fullScreenQuery.addEventListener('change', this.onMediaChange);
-    }
+    this.config.fullScreenQuery?.addEventListener('change', this.onMediaChange);
     this.applyPresentation();
     this.config.onConnect(this);
   }
 
   disconnect(): void {
     deregister(this.iframe?.contentWindow ?? null);
-    this.fullScreenQuery?.removeEventListener('change', this.onMediaChange);
+    this.config.fullScreenQuery?.removeEventListener('change', this.onMediaChange);
     this.restoreStyles?.();
 
     this.iframe?.remove();
     this.iframe = null;
     this.config.onDisconnect(this);
+  }
+
+  /**
+   * destroy()-only teardown: also severs the element's back-reference so
+   * a partner still holding the element cannot keep the dead instance's
+   * SessionManager and handlers reachable. Ordinary unmount/remount must
+   * keep the controller, so this never runs from disconnectedCallback.
+   */
+  dispose(): void {
+    this.disconnect();
+    this.host.controller = null;
   }
 
   post(message: LoaderMessage): void {
@@ -124,17 +144,21 @@ export class FrameController {
 
     switch (message.type) {
       case 'ready':
-        void this.config.sessions.current().then((session) =>
-          this.post({
-            type: 'init',
-            payload: {
-              session,
-              protocol: Math.min(PROTOCOL_VERSION, message.payload.protocolMax),
-              appearance: this.config.state.appearance,
-              locale: this.config.state.locale,
-            },
-          }),
-        );
+        // Rejection swallowed for the same reason as SessionManager.renewNow().
+        void this.config.sessions
+          .current()
+          .then((session) =>
+            this.post({
+              type: 'init',
+              payload: {
+                session,
+                protocol: Math.min(PROTOCOL_VERSION, message.payload.protocolMax),
+                appearance: this.config.state.appearance,
+                locale: this.config.state.locale,
+              },
+            }),
+          )
+          .catch(() => {});
         break;
       case 'resize':
         if (this.iframe && !this.restoreStyles)
@@ -151,25 +175,27 @@ export class FrameController {
         this.config.sessions.renewNow();
         break;
       case 'formed':
-        this.config.onFormed({ companyId: message.payload.companyId });
+        // The projection IS the "carries ONLY the company id" rule from
+        // DoolaOptions.onFormed in the contract — formed-specific, because
+        // anything handed to partner JS can be tampered with before their
+        // checkout reads it. A future app field must not leak by accident.
+        this.config.handlers.onFormed({ companyId: message.payload.companyId });
         break;
       case 'auth-error':
-        this.config.onAuthError(message.payload);
+        this.config.handlers.onAuthError(message.payload);
         break;
       case 'loader-start':
-        this.config.onLoaderStart?.();
+        this.config.handlers.onLoaderStart?.();
         break;
       case 'load-error':
-        this.config.onLoadError?.(message.payload);
+        this.config.handlers.onLoadError?.(message.payload);
         break;
       // Unknown types from a newer app are ignored, never an error (docs/protocol.md).
     }
   }
 
   private applyPresentation(): void {
-    const wantFullScreen =
-      this.config.presentationMode === 'fullScreen' ||
-      (this.config.presentationMode === 'auto' && this.fullScreenQuery?.matches === true);
+    const wantFullScreen = this.config.fullScreenQuery?.matches ?? true;
 
     if (wantFullScreen && !this.restoreStyles) {
       const iframe = this.iframe;

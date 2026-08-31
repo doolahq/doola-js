@@ -1,12 +1,4 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    // Local exception to the strict base: this package has real devDependencies
-    // (vitest, tsup) whose bundled .d.ts files do not compile under the base's
-    // ES2020 lib. Our own sources are still fully checked; only node_modules
-    // declaration files are skipped. The contract package (@doola/js) stays on
-    // the base with no skip — that gate is the reason the base has none.
-    "skipLibCheck": true
-  },
-  "include": ["src", "test"]
+  "include": ["src"]
 }

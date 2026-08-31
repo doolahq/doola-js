@@ -12,6 +12,13 @@ const MIN_RENEWAL_DELAY_MS = 5_000;
 /** Treat a session this close to expiry as stale when resuming. */
 const STALENESS_MARGIN_MS = 30_000;
 
+/** The session plus its deadlines, precomputed once on the local clock at receipt. */
+interface ActiveSession {
+  session: CustomerSession;
+  renewAt: number;
+  staleAt: number;
+}
+
 /**
  * The status→type mapping the loader owns (docs/protocol.md). The public
  * contract (FetchAccessToken docs) asks partners to reject with an object
@@ -46,13 +53,11 @@ function classifyRejection(
  * consumes; resume() re-mints on next mount if the session went stale.
  */
 export class SessionManager {
-  private session: CustomerSession | null = null;
-  /** Local-clock ms when the current session arrived. */
-  private receivedAt = 0;
+  private active: ActiveSession | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private pending: Promise<CustomerSession> | null = null;
-  // Starts paused: the warm-start mint must not begin a renewal loop on a
-  // page that never mounts a frame. resume() runs on first mount.
+  // Starts paused: a mint must not begin a renewal loop on a page that
+  // never mounts a frame. resume() runs on first mount.
   private paused = true;
   private stopped = false;
 
@@ -64,9 +69,10 @@ export class SessionManager {
 
   /** The current session, minting or re-minting if absent or stale. */
   current(): Promise<CustomerSession> {
-    if (this.session && !this.isStale()) return Promise.resolve(this.session);
+    const fresh = this.fresh();
+    if (fresh) return Promise.resolve(fresh.session);
 
-    return this.refresh('mint_failed');
+    return this.refresh();
   }
 
   /** Backstop path: the app hit a 401 mid-session and asked for a fresh token. */
@@ -74,7 +80,7 @@ export class SessionManager {
     // Failure is already routed to onAuthError inside refresh(); swallowing
     // the rejection keeps a failed background renewal from surfacing as an
     // unhandled rejection in the partner's console.
-    this.refresh('renewal_failed').catch(() => {});
+    this.refresh().catch(() => {});
   }
 
   /** Last frame disconnected: stop renewing until something consumes tokens again. */
@@ -89,25 +95,28 @@ export class SessionManager {
   resume(): void {
     this.paused = false;
 
-    if (this.session && !this.isStale()) this.schedule();
+    const fresh = this.fresh();
+    if (fresh) this.schedule(fresh);
     else this.renewNow();
   }
 
   stop(): void {
     this.stopped = true;
     this.pause();
-    this.session = null;
+    this.active = null;
   }
 
-  private ttlMs(): number {
-    return (this.session?.expiresIn ?? 0) * 1_000;
+  /** The live session if it is still fresh enough to hand out, else null. */
+  private fresh(): ActiveSession | null {
+    return this.active && Date.now() < this.active.staleAt ? this.active : null;
   }
 
-  private isStale(): boolean {
-    return Date.now() - this.receivedAt > this.ttlMs() - STALENESS_MARGIN_MS;
-  }
+  private refresh(): Promise<CustomerSession> {
+    // Whether a failure is a mint or a renewal is session state, not the
+    // caller's business (docs/protocol.md step 4): once any session has
+    // existed, every re-fetch is a renewal.
+    const fallback: DoolaAuthError['type'] = this.active ? 'renewal_failed' : 'mint_failed';
 
-  private refresh(failureType: DoolaAuthError['type']): Promise<CustomerSession> {
     // Collapse concurrent callers (several components mounting at once,
     // or the proactive timer racing the 401 backstop) into one fetch.
     const pending = (this.pending ??= this.fetchAccessToken()
@@ -115,9 +124,16 @@ export class SessionManager {
         this.pending = null;
         if (this.stopped) return session;
 
-        this.session = session;
-        this.receivedAt = Date.now();
-        if (!this.paused) this.schedule();
+        const now = Date.now();
+        const ttlMs = session.expiresIn * 1_000;
+        const active: ActiveSession = {
+          session,
+          renewAt: now + ttlMs * RENEWAL_FRACTION,
+          staleAt: now + ttlMs - STALENESS_MARGIN_MS,
+        };
+        this.active = active;
+
+        if (!this.paused) this.schedule(active);
         this.onSession(session);
 
         return session;
@@ -125,7 +141,7 @@ export class SessionManager {
       .catch((error: unknown) => {
         this.pending = null;
 
-        const type = classifyRejection(error, failureType);
+        const type = classifyRejection(error, fallback);
         this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
 
         throw error;
@@ -135,14 +151,14 @@ export class SessionManager {
   }
 
   /**
-   * Fire at receivedAt + 80% of the lifetime. At receipt that is a plain
-   * relative timer; on a mid-life resume it is the remainder of the same
-   * point, so pause/resume never renews earlier or later than planned.
+   * Fire at 80% of the lifetime, counted from receipt. On a mid-life
+   * resume the delay is the remainder to the same point, so pause/resume
+   * never renews earlier or later than planned.
    */
-  private schedule(): void {
+  private schedule(active: ActiveSession): void {
     if (this.timer) clearTimeout(this.timer);
 
-    const delay = this.receivedAt + this.ttlMs() * RENEWAL_FRACTION - Date.now();
+    const delay = active.renewAt - Date.now();
 
     this.timer = setTimeout(() => this.renewNow(), Math.max(delay, MIN_RENEWAL_DELAY_MS));
   }

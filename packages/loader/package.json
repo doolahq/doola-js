@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "build": "tsup src/index.ts --format iife --target es2020 --clean --out-dir dist",
     "test": "vitest run"
   },

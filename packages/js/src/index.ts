@@ -41,13 +41,21 @@ function injectLoader(): Promise<DoolaGlobal> {
     const existing = document.querySelector<HTMLScriptElement>(`script[src="${LOADER_URL}"]`);
     const script = existing ?? document.createElement('script');
 
+    // On failure, a tag this shim injected must go too: the next attempt's
+    // querySelector would otherwise find the dead tag, skip injection, and
+    // never settle. A partner-added tag is theirs — never removed here.
+    const fail = (error: Error) => {
+      if (!existing) script.remove();
+      loaderPromise = null;
+      reject(error);
+    };
+
     script.addEventListener('load', () => {
       if (window.Doola) resolve(window.Doola);
-      else reject(new Error('The doola loader loaded but did not initialize.'));
+      else fail(new Error('The doola loader loaded but did not initialize.'));
     });
     script.addEventListener('error', () => {
-      loaderPromise = null;
-      reject(
+      fail(
         new Error(`Failed to load ${LOADER_URL}. Check your CSP allows script-src js.doola.com.`),
       );
     });
@@ -66,8 +74,9 @@ function injectLoader(): Promise<DoolaGlobal> {
  * Injects the loader from js.doola.com (if not already present) and
  * initializes it. Resolves once the loader is ready to create
  * components. One live instance per page: reuse it across mounts, and
- * call again only after destroy() — the script itself is never
- * re-injected.
+ * call again only after destroy() — while an instance is live this
+ * rejects rather than minting a second session. The script itself is
+ * never re-injected.
  */
 export async function loadDoola(options: DoolaOptions): Promise<Doola> {
   const loader = await injectLoader();

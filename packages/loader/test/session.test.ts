@@ -8,7 +8,7 @@ const session = (expiresIn: number) => ({
 });
 
 const TEN_MINUTES_S = 600;
-const TEN_MINUTES_MS = 600_000;
+const TEN_MINUTES_MS = TEN_MINUTES_S * 1_000;
 
 describe('SessionManager', () => {
   beforeEach(() => vi.useFakeTimers());

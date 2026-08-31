@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Tests pull in vitest, whose bundled .d.ts chain (vite, rollup,
+    // @types/node) does not compile under the base's ES2020 lib and empty
+    // `types`. skipLibCheck skips ALL .d.ts in this program — including the
+    // contract — so it is confined to this test-only config; src (and the
+    // contract via the src program in packages/js) stays on the strict base.
+    "skipLibCheck": true
+  },
+  "include": ["src", "test"]
+}
