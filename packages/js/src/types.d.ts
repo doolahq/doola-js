@@ -121,14 +121,16 @@ export interface Appearance {
  *
  * `fullScreen` promotes the iframe to a fixed full-viewport overlay so
  * the frame owns the whole scroll context — the mitigation for the iOS
- * keyboard covering focused inputs inside a scrolled iframe. With mode
- * `auto` (default), inline presentation promotes to full screen below
- * `fullScreenBreakpoint`.
+ * keyboard covering focused inputs inside a scrolled iframe. `auto`
+ * (the default) applies that promotion on narrow viewports on its own;
+ * the threshold is loader policy, not a partner option, because the
+ * failure it prevents is a property of the device and invisible in the
+ * partner's own testing. There is deliberately no way to opt out of
+ * the keyboard fix — only to force the overlay for layouts that want
+ * it everywhere.
  */
 export interface Presentation {
-  mode?: 'inline' | 'fullScreen' | 'auto' | undefined;
-  /** Viewport width in px below which `auto` promotes to full screen. Default 640. */
-  fullScreenBreakpoint?: number | undefined;
+  mode?: 'fullScreen' | 'auto' | undefined;
 }
 
 /** Options accepted by {@link loadDoola}. Passed once, at init. */

@@ -13,7 +13,9 @@ This section is the canonical definition; everything else in the repo points her
   fine, breaking requires a major and a migration note, and removals
   effectively never happen. These rules bind from the first published release;
   until then the surface is explicitly unstable and review may reshape it
-  without migration notes or changesets.
+  without migration notes or changesets. `docs/errors.md` is contract surface —
+  changes to it are reviewed as API changes — but where the two files disagree
+  on meaning, the `.d.ts` decides and `errors.md` has the bug.
 - **Internal but versioned:** `docs/protocol.md`. Partners never touch it, but
   the loader and the embedded app deploy independently, so it carries its own
   version and both sides support N−1.
