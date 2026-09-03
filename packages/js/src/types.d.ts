@@ -48,12 +48,17 @@ export interface CustomerSession {
  *
  * On failure, reject with an object exposing the HTTP `status` the
  * partner's route observed —
- * `throw Object.assign(new Error('doola session'), { status: r.status })`
- * — and have the route pass doola's status through rather than
- * flattening it to 200. The loader maps that status to a
- * {@link DoolaAuthError}; each case's meaning is documented there. The
- * mapping itself is loader policy (docs/protocol.md), so cases can be
- * added without touching partner code.
+ * `throw Object.assign(new Error('doola session'), { status: r.status })`.
+ * The route itself must never flatten a failure to 200, and must forward
+ * only statuses that are about the CUSTOMER: its own 401 when the user's
+ * session with the partner died, and doola's 409. A 401 from doola is
+ * the partner's problem — a broken API key, a suspended tenant — and
+ * forwarding it would send an already-logged-in customer into a login
+ * loop; the route surfaces those as a 502 instead (see the README
+ * route). The loader maps the status to a {@link DoolaAuthError}; each
+ * case's meaning is documented there. The mapping itself is loader
+ * policy (docs/protocol.md), so cases can be added without touching
+ * partner code.
  */
 export type FetchAccessToken = () => Promise<CustomerSession>;
 
@@ -181,7 +186,10 @@ export interface DoolaOptions {
    * from their own domain via CNAME. Overrides exactly the SDK-origin
    * half of the environment and nothing else — the API host still
    * follows the key. The loader also uses this value as its postMessage
-   * origin check, both directions.
+   * origin check, both directions — it is a trust anchor: the session
+   * token is posted to this origin. It MUST be a constant in your code,
+   * never derived from a URL parameter, form input, or anything else a
+   * user can influence.
    */
   origin?: string | undefined;
 

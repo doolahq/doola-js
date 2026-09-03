@@ -96,6 +96,9 @@ living in the partner's page).
    `FetchAccessToken`):
    - `401` → `onAuthError({ type: 'partner_session_expired', message: … })`,
      and the loader stops retrying — the partner's own user session died.
+     Only the partner's own 401 can reach the loader: the contract
+     (`FetchAccessToken`) has the route surface doola's auth failures as
+     5xx, so a broken `dk_` key lands in the bucket below, never here.
    - `409` → `onAuthError({ type: 'email_in_use', message: … })`, also
      terminal. First mint only; cannot occur on renewal.
    - anything else → `mint_failed` on first mint, `renewal_failed` on renewal.
