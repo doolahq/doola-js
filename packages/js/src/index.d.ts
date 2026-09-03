@@ -49,16 +49,18 @@ export interface CustomerSession {
  * On failure, reject with an object exposing the HTTP `status` the
  * partner's route observed —
  * `throw Object.assign(new Error('doola session'), { status: r.status })`.
- * The route itself must never flatten a failure to 200, and must forward
- * only statuses that are about the CUSTOMER: its own 401 when the user's
- * session with the partner died, and doola's 409. A 401 from doola is
- * the partner's problem — a broken API key, a suspended tenant — and
- * forwarding it would send an already-logged-in customer into a login
- * loop; the route surfaces those as a 502 instead (see the README
- * route). The loader maps the status to a {@link DoolaAuthError}; each
- * case's meaning is documented there. The mapping itself is loader
- * policy (docs/protocol.md), so cases can be added without touching
- * partner code.
+ * The route itself must never flatten a failure to 200, and must never
+ * forward doola's own 401: that status means the partner's key or
+ * tenant, not the customer's session, and the loader reads any 401 as
+ * `partner_session_expired` — forwarding it would loop an
+ * already-logged-in customer through the partner's login. The route
+ * rewrites it to a 5xx (the README route uses 502) so it lands in the
+ * transient bucket. Every other status passes through — the route's own
+ * 401 and doola's 409 are the customer-addressed ones — so statuses
+ * doola adds later reach the loader without partner code changes. The
+ * loader maps the status to a {@link DoolaAuthError}; each case's
+ * meaning is documented there, and the mapping itself is loader policy
+ * (docs/protocol.md).
  */
 export type FetchAccessToken = () => Promise<CustomerSession>;
 
@@ -138,7 +140,12 @@ export interface Presentation {
   mode?: 'fullScreen' | 'auto' | undefined;
 }
 
-/** Options accepted by {@link loadDoola}. Passed once, at init. */
+/**
+ * Options accepted by {@link loadDoola}. Passed once, at init. A repeat
+ * `loadDoola` call with the same `publishableKey` resolves to the live
+ * instance, ignoring the options it carries; a different key rejects
+ * until `destroy()`.
+ */
 export interface DoolaOptions {
   /**
    * The partner's publishable key (`pk_test_…` or `pk_live_…`).

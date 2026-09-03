@@ -42,11 +42,9 @@ app.post('/doola-session', async (req, res) => {
     body: JSON.stringify({ email: req.user.email }),
   });
 
-  // forward only statuses that are about the customer (doola's 409 =
-  // email in use). Anything else non-ok — including a doola 401, which
-  // means YOUR key or tenant, not their session — surfaces as 502 so the
-  // SDK reports mint_failed instead of looping the customer to your login.
-  if (!r.ok) return res.status(r.status === 409 ? 409 : 502).end();
+  // one exception: doola's 401 means YOUR key or tenant, not the
+  // customer's session — forwarding it would loop them to your login.
+  if (!r.ok) return res.status(r.status === 401 ? 502 : r.status).end();
 
   // forward exactly the fields the loader consumes, never the whole body
   const { accessToken, expiresIn } = await r.json();
