@@ -18,13 +18,25 @@ const FULLSCREEN_BREAKPOINT_PX = 640;
  * The live instance, or null. One live instance per page (the
  * contract's loadDoola doc): liveness is identity, so "this handle was
  * destroyed" and "this handle is not the live one" are the same check.
+ * The key rides along so a repeat init() with the same key can return
+ * the instance instead of failing — React StrictMode double-invokes
+ * effect setup in development, and destroy() is logout-only, so the
+ * second call must succeed.
  */
-let live: Doola | null = null;
+let live: { instance: Doola; publishableKey: string } | null = null;
 
 function init(options: DoolaOptions): Doola {
   const { publishableKey, fetchAccessToken, onAuthError, onFormed } = options;
 
-  if (live) throw new Error('doola: an instance is already live. Call destroy() on it first.');
+  if (live) {
+    // Same key, same session: hand the live instance back (the repeat
+    // call's other options are ignored — contract, loadDoola).
+    if (live.publishableKey === publishableKey) return live.instance;
+
+    throw new Error(
+      'doola: an instance with a different publishableKey is already live. Call destroy() on it first.',
+    );
+  }
   if (!publishableKey) throw new Error('doola: publishableKey is required.');
   if (typeof fetchAccessToken !== 'function')
     throw new Error('doola: fetchAccessToken must be a function.');
@@ -63,7 +75,7 @@ function init(options: DoolaOptions): Doola {
 
   defineElementOnce();
 
-  const isLive = (): boolean => live === instance;
+  const isLive = (): boolean => live?.instance === instance;
   const assertLive = (method: string): void => {
     if (!isLive())
       throw new Error(`doola: ${method}() called on a destroyed instance. Call loadDoola() again.`);
@@ -127,7 +139,7 @@ function init(options: DoolaOptions): Doola {
     },
   };
 
-  live = instance;
+  live = { instance, publishableKey };
 
   return instance;
 }

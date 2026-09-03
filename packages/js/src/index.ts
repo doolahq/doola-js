@@ -73,9 +73,10 @@ function injectLoader(): Promise<DoolaGlobal> {
 /**
  * Injects the loader from js.doola.com (if not already present) and
  * initializes it. Resolves once the loader is ready to create
- * components. One live instance per page: reuse it across mounts, and
- * call again only after destroy() — while an instance is live this
- * rejects rather than minting a second session. The script itself is
+ * components. One live instance per page: a repeat call with the same
+ * publishableKey resolves to the live instance (other options ignored —
+ * a React StrictMode double-invoke gets the instance back, not an
+ * error); a different key rejects until destroy(). The script itself is
  * never re-injected.
  */
 export async function loadDoola(options: DoolaOptions): Promise<Doola> {
