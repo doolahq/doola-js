@@ -10,7 +10,6 @@ export interface Env {
   keyPrefix: string;
 }
 
-// Hostnames pending PENG-6216; test-stack host follows the api.test.doola.com pattern.
 const ENVS: Env[] = [
   { name: 'live', keyPrefix: 'pk_live_', sdkOrigin: 'https://sdk.doola.com' },
   { name: 'test', keyPrefix: 'pk_test_', sdkOrigin: 'https://sdk.test.doola.com' },
