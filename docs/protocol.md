@@ -9,6 +9,10 @@ but versioned like a public API because **the two sides deploy independently**:
 on every deploy, new-loader-with-old-app and old-loader-with-new-app both exist
 in the wild for minutes. Both sides MUST support protocol version N−1.
 
+N−1 covers only this pair, which deploys minutes apart. The shim ↔ loader pair
+lives under a much stricter rule — every published shim version, for as long as
+it is installed anywhere within a loader URL major — owned by CONTRIBUTING.md.
+
 Everywhere this document says "the SDK origin", it means the value the loader
 resolved for this instance — from the publishable key's environment, or from the
 `origin` option for CNAME partners (both defined in the contract) — never a
