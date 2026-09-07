@@ -25,6 +25,16 @@ interface ActiveSession {
  * exposing the HTTP `status` — throwing the fetch Response satisfies it.
  * This is the implementer of that published rule.
  */
+/** The terminal cases of the contract's union — retrying never succeeds. */
+const TERMINAL: ReadonlySet<DoolaAuthError['type']> = new Set([
+  'partner_session_expired',
+  'email_in_use',
+]);
+
+export function isRetryable(type: DoolaAuthError['type']): boolean {
+  return !TERMINAL.has(type);
+}
+
 function classifyRejection(
   error: unknown,
   fallback: DoolaAuthError['type'],

@@ -1,4 +1,11 @@
-import type { Appearance, CustomerSession, DoolaAuthError, DoolaLoadError } from '@doola/js';
+import type { CustomerSession, DoolaAuthError, DoolaLoadError } from '@doola/js';
+
+/**
+ * Branding pushed over the bus by doola-internal peers (the portal's
+ * preview) — not a partner option. Its shape is owned by the branding
+ * backend (PENG-6219); the loader never populates it.
+ */
+export type BusAppearance = Record<string, unknown>;
 
 /**
  * The loader <-> iframe protocol. Spec: docs/protocol.md. The two sides
@@ -22,7 +29,7 @@ export type LoaderMessage =
       type: 'init';
       payload: {
         session: CustomerSession;
-        appearance?: Appearance | undefined;
+        appearance?: BusAppearance | undefined;
         locale?: string | undefined;
         protocol: number;
       };
@@ -30,7 +37,11 @@ export type LoaderMessage =
   | { type: 'token'; payload: { session: CustomerSession } }
   | {
       type: 'update';
-      payload: { appearance?: Appearance | undefined; locale?: string | undefined };
+      payload: { appearance?: BusAppearance | undefined; locale?: string | undefined };
+    }
+  | {
+      type: 'token-error';
+      payload: { reason: DoolaAuthError['type']; message: string; retryable: boolean };
     }
   | { type: 'presentation'; payload: { mode: 'inline' | 'fullScreen' } };
 

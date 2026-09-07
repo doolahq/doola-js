@@ -11,7 +11,7 @@ const FULLSCREEN_FRAME_CSS =
 export const ELEMENT_TAG = 'doola-embed';
 
 /** Per-instance state shared by init() and every controller it creates. */
-export type InstanceState = Pick<DoolaOptions, 'appearance' | 'locale'>;
+export type InstanceState = Pick<DoolaOptions, 'locale'>;
 
 /** The partner's handlers, typed by the contract so a contract change is a type error here. */
 export type InstanceHandlers = Pick<
@@ -153,7 +153,6 @@ export class FrameController {
               payload: {
                 session,
                 protocol: Math.min(PROTOCOL_VERSION, message.payload.protocolMax),
-                appearance: this.config.state.appearance,
                 locale: this.config.state.locale,
               },
             }),

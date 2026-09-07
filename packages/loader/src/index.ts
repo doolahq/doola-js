@@ -9,7 +9,7 @@ import {
   type InstanceState,
 } from './component';
 import { envFromPublishableKey } from './env';
-import { SessionManager } from './session';
+import { isRetryable, SessionManager } from './session';
 
 /** `auto` promotes to full screen below this width. Loader policy — see `Presentation` in the contract. */
 const FULLSCREEN_BREAKPOINT_PX = 640;
@@ -50,7 +50,7 @@ function init(options: DoolaOptions): Doola {
   const env = envFromPublishableKey(publishableKey);
   const sdkOrigin = options.origin ?? env.sdkOrigin;
 
-  const state: InstanceState = { appearance: options.appearance, locale: options.locale };
+  const state: InstanceState = { locale: options.locale };
   // Snapshot: the contract fixes options at init, so later mutation of the
   // partner's object must not change what mounted frames observe.
   const handlers: InstanceHandlers = {
@@ -66,9 +66,27 @@ function init(options: DoolaOptions): Doola {
       : null;
   const mounted = new Set<FrameController>();
 
-  const sessions = new SessionManager(fetchAccessToken, onAuthError, (session) => {
-    for (const frame of mounted) frame.post({ type: 'token', payload: { session } });
-  });
+  const sessions = new SessionManager(
+    fetchAccessToken,
+    (error) => {
+      // The frame must never hang on an unanswered token-request
+      // (docs/protocol.md, token-error); the partner hears about it too.
+      for (const frame of mounted) {
+        frame.post({
+          type: 'token-error',
+          payload: {
+            reason: error.type,
+            message: error.message,
+            retryable: isRetryable(error.type),
+          },
+        });
+      }
+      onAuthError(error);
+    },
+    (session) => {
+      for (const frame of mounted) frame.post({ type: 'token', payload: { session } });
+    },
+  );
 
   defineElementOnce();
 
@@ -111,18 +129,14 @@ function init(options: DoolaOptions): Doola {
 
       // Merge semantics: types.d.ts (update) and docs/protocol.md (update
       // message). A call naming no keys merges nothing, so there is nothing
-      // to post; when a key is present the resolved state always goes out —
+      // to post; when the key is present the resolved state always goes out —
       // the app replaces wholesale, so a same-value post is harmless.
-      if (!('appearance' in next) && !('locale' in next)) return;
+      if (!('locale' in next)) return;
 
-      if ('appearance' in next) state.appearance = next.appearance;
-      if ('locale' in next) state.locale = next.locale;
+      state.locale = next.locale;
 
       for (const frame of mounted) {
-        frame.post({
-          type: 'update',
-          payload: { appearance: state.appearance, locale: state.locale },
-        });
+        frame.post({ type: 'update', payload: { locale: state.locale } });
       }
     },
 
