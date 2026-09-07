@@ -134,9 +134,9 @@ export interface DoolaOptions {
   /**
    * MUST be handled — see {@link DoolaAuthError} for each case and the
    * expected response. Fires on every failed fetch, not once per
-   * incident: the first mint, then each automatic retry and each
-   * `token-request` from the frame. Handlers must be idempotent — a
-   * redirect to your login must tolerate being triggered more than once.
+   * incident — retries, frame-initiated renewals, and later mounts all
+   * fetch again. Handlers must be idempotent: a redirect to your login
+   * must tolerate being triggered more than once.
    */
   onAuthError: (error: DoolaAuthError) => void;
 

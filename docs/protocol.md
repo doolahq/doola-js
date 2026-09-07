@@ -65,15 +65,17 @@ up front, in the `ready`/`init` handshake: `ready` carries the app's
 | `load-error`     | `{ type, message }` | 1     | loader forwards to `onLoadError`                                                                                               |
 | `loader-start`   | `{}`                | 1     | first paint inside the frame                                                                                                   |
 
-## Messages: loader → app
+## Messages: mounting peer → app
 
-| type           | payload                                       | since | notes                                                                                                             |
-| -------------- | --------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------- |
-| `init`         | `{ session, appearance?, locale?, protocol }` | 1     | first message after `ready`                                                                                       |
-| `token`        | `{ session }`                                 | 1     | renewal result; also the reply to `token-request`                                                                 |
-| `update`       | `{ appearance?, locale? }`                    | 1     | runtime `update()` call — see below                                                                               |
-| `token-error`  | `{ reason, message, retryable }`              | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type, `retryable` is false for its terminal cases |
-| `presentation` | `{ mode }`                                    | 1     | inline ↔ fullScreen transitions                                                                                   |
+The mounting peer is the loader — or the portal's branding preview, see below.
+
+| type           | payload                                       | since | notes                                                                                                                                                                                                                                                            |
+| -------------- | --------------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `init`         | `{ session, appearance?, locale?, protocol }` | 1     | first message after `ready`; `appearance` is sent by internal peers only                                                                                                                                                                                         |
+| `token`        | `{ session }`                                 | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                |
+| `update`       | `{ appearance?, locale? }`                    | 1     | runtime `update()` call — see below; `appearance` internal peers only                                                                                                                                                                                            |
+| `token-error`  | `{ reason, message, retryable }`              | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type; `retryable` means the loader will keep renewing on its own — the frame may still send `token-request` in either case, for terminal reasons only after the user has acted outside the frame |
+| `presentation` | `{ mode }`                                    | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                  |
 
 `update` carries the loader's **resolved** state, not the partner's raw call:
 the contract's merge semantics (absent key keeps, key present as `undefined`
@@ -112,8 +114,8 @@ living in the partner's page).
    - `401` → `onAuthError({ type: 'partner_session_expired', message: … })`,
      and the loader stops retrying on its own — automatic renewal ends, but a
      `token-request` from the frame (a user-initiated try-again after logging
-     back in with the partner) is still honoured. The partner's own user
-     session died. Only the partner's own 401 can reach the loader — the route
+     back in with the partner) is still honoured, and so is a later mount,
+     which fetches afresh. The partner's own user session died. Only the partner's own 401 can reach the loader — the route
      rule lives on `FetchAccessToken` in the contract; a broken `dk_` key
      lands in `mint_failed`/`renewal_failed`, never here.
    - `409` → `onAuthError({ type: 'email_in_use', message: … })`, also
