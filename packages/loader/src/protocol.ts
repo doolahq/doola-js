@@ -1,13 +1,6 @@
 import type { CustomerSession, DoolaAuthError, DoolaLoadError } from '@doola/js';
 
 /**
- * Branding pushed over the bus by doola-internal peers (the portal's
- * preview) — not a partner option. Its shape is owned by the branding
- * backend (PENG-6219); the loader never populates it.
- */
-export type BusAppearance = Record<string, unknown>;
-
-/**
  * The loader <-> iframe protocol. Spec: docs/protocol.md. The two sides
  * deploy independently, so every message carries `v` and both sides
  * support N-1. Unknown message types are ignored, never an error.
@@ -27,18 +20,10 @@ export type AppMessage =
 export type LoaderMessage =
   | {
       type: 'init';
-      payload: {
-        session: CustomerSession;
-        appearance?: BusAppearance | undefined;
-        locale?: string | undefined;
-        protocol: number;
-      };
+      payload: { session: CustomerSession; locale?: string | undefined; protocol: number };
     }
   | { type: 'token'; payload: { session: CustomerSession } }
-  | {
-      type: 'update';
-      payload: { appearance?: BusAppearance | undefined; locale?: string | undefined };
-    }
+  | { type: 'update'; payload: { locale?: string | undefined } }
   | {
       type: 'token-error';
       payload: { reason: DoolaAuthError['type']; message: string; retryable: boolean };
@@ -56,6 +41,25 @@ export function parseAppMessage(data: unknown): AppMessage | null {
   if (typeof type !== 'string' || typeof payload !== 'object' || payload === null) return null;
 
   return data as AppMessage;
+}
+
+/**
+ * Whether the loader will keep renewing on its own after this failure.
+ * Exhaustive over the contract's union so a new case is a compile error
+ * here rather than a silent "retryable".
+ */
+const RETRYABLE: Record<DoolaAuthError['type'], boolean> = {
+  partner_session_expired: false,
+  email_in_use: false,
+  mint_failed: true,
+  renewal_failed: true,
+};
+
+export function tokenError(error: DoolaAuthError): Extract<LoaderMessage, { type: 'token-error' }> {
+  return {
+    type: 'token-error',
+    payload: { reason: error.type, message: error.message, retryable: RETRYABLE[error.type] },
+  };
 }
 
 export function envelope(message: LoaderMessage): Envelope {

@@ -9,7 +9,8 @@ import {
   type InstanceState,
 } from './component';
 import { envFromPublishableKey } from './env';
-import { isRetryable, SessionManager } from './session';
+import { tokenError, type LoaderMessage } from './protocol';
+import { SessionManager } from './session';
 
 /** `auto` promotes to full screen below this width. Loader policy — see `Presentation` in the contract. */
 const FULLSCREEN_BREAKPOINT_PX = 640;
@@ -65,27 +66,19 @@ function init(options: DoolaOptions): Doola {
       ? window.matchMedia(`(max-width: ${FULLSCREEN_BREAKPOINT_PX}px)`)
       : null;
   const mounted = new Set<FrameController>();
+  const broadcast = (message: LoaderMessage): void => {
+    for (const frame of mounted) frame.post(message);
+  };
 
+  // A failed fetch is answered on both sides: the frame gets token-error so
+  // it never hangs on an unanswered token-request, the partner gets onAuthError.
   const sessions = new SessionManager(
     fetchAccessToken,
     (error) => {
-      // The frame must never hang on an unanswered token-request
-      // (docs/protocol.md, token-error); the partner hears about it too.
-      for (const frame of mounted) {
-        frame.post({
-          type: 'token-error',
-          payload: {
-            reason: error.type,
-            message: error.message,
-            retryable: isRetryable(error.type),
-          },
-        });
-      }
+      broadcast(tokenError(error));
       onAuthError(error);
     },
-    (session) => {
-      for (const frame of mounted) frame.post({ type: 'token', payload: { session } });
-    },
+    (session) => broadcast({ type: 'token', payload: { session } }),
   );
 
   defineElementOnce();
@@ -127,17 +120,11 @@ function init(options: DoolaOptions): Doola {
     update(next) {
       assertLive('update');
 
-      // Merge semantics: types.d.ts (update) and docs/protocol.md (update
-      // message). A call naming no keys merges nothing, so there is nothing
-      // to post; when the key is present the resolved state always goes out —
-      // the app replaces wholesale, so a same-value post is harmless.
+      // Absent key keeps, present-as-undefined clears — types.d.ts (update).
       if (!('locale' in next)) return;
 
       state.locale = next.locale;
-
-      for (const frame of mounted) {
-        frame.post({ type: 'update', payload: { locale: state.locale } });
-      }
+      broadcast({ type: 'update', payload: { locale: state.locale } });
     },
 
     destroy() {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { isRetryable, SessionManager } from '../src/session';
+import { SessionManager } from '../src/session';
 
 const session = (expiresIn: number) => ({
   accessToken: 'cs_test_token',
@@ -140,13 +140,6 @@ describe('SessionManager', () => {
     );
     await expect(failing.current()).rejects.toBeDefined();
     expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type: 'mint_failed' }));
-  });
-
-  it('marks only the terminal cases of the contract as not retryable', () => {
-    expect(isRetryable('partner_session_expired')).toBe(false);
-    expect(isRetryable('email_in_use')).toBe(false);
-    expect(isRetryable('mint_failed')).toBe(true);
-    expect(isRetryable('renewal_failed')).toBe(true);
   });
 
   it('stop() cancels the pending renewal', async () => {

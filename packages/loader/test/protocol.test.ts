@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { envelope, parseAppMessage, PROTOCOL_VERSION } from '../src/protocol';
+import { envelope, parseAppMessage, PROTOCOL_VERSION, tokenError } from '../src/protocol';
 
 describe('parseAppMessage', () => {
   it('accepts a well-formed message at the current version', () => {
@@ -31,6 +31,16 @@ describe('parseAppMessage', () => {
     ]) {
       expect(parseAppMessage(junk)).toBeNull();
     }
+  });
+
+  it('marks only the terminal auth cases as not retryable', () => {
+    const retryable = (type: Parameters<typeof tokenError>[0]['type']) =>
+      tokenError({ type, message: '' }).payload.retryable;
+
+    expect(retryable('partner_session_expired')).toBe(false);
+    expect(retryable('email_in_use')).toBe(false);
+    expect(retryable('mint_failed')).toBe(true);
+    expect(retryable('renewal_failed')).toBe(true);
   });
 
   it('stamps outbound messages with the current version', () => {

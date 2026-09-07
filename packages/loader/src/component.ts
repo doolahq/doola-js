@@ -144,7 +144,8 @@ export class FrameController {
 
     switch (message.type) {
       case 'ready':
-        // Rejection swallowed for the same reason as SessionManager.renewNow().
+        // Rejection swallowed: the partner hears via onAuthError and this
+        // frame via token-error (both from the manager's failure callback).
         void this.config.sessions
           .current()
           .then((session) =>
