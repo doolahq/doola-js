@@ -9,6 +9,10 @@ but versioned like a public API because **the two sides deploy independently**:
 on every deploy, new-loader-with-old-app and old-loader-with-new-app both exist
 in the wild for minutes. Both sides MUST support protocol version N−1.
 
+N−1 covers only this pair, which deploys minutes apart. The shim ↔ loader pair
+lives under a much stricter rule — every published shim version, for as long as
+it is installed anywhere within a loader URL major — owned by CONTRIBUTING.md.
+
 Everywhere this document says "the SDK origin", it means the value the loader
 resolved for this instance — from the publishable key's environment, or from the
 `origin` option for CNAME partners (both defined in the contract) — never a
@@ -63,17 +67,26 @@ up front, in the `ready`/`init` handshake: `ready` carries the app's
 
 ## Messages: loader → app
 
-| type           | payload                                       | since | notes                                             |
-| -------------- | --------------------------------------------- | ----- | ------------------------------------------------- |
-| `init`         | `{ session, appearance?, locale?, protocol }` | 1     | first message after `ready`                       |
-| `token`        | `{ session }`                                 | 1     | renewal result; also the reply to `token-request` |
-| `update`       | `{ appearance?, locale? }`                    | 1     | runtime `update()` call — see below               |
-| `presentation` | `{ mode }`                                    | 1     | inline ↔ fullScreen transitions                   |
+| type           | payload                                       | since | notes                                                                                                             |
+| -------------- | --------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------- |
+| `init`         | `{ session, appearance?, locale?, protocol }` | 1     | first message after `ready`                                                                                       |
+| `token`        | `{ session }`                                 | 1     | renewal result; also the reply to `token-request`                                                                 |
+| `update`       | `{ appearance?, locale? }`                    | 1     | runtime `update()` call — see below                                                                               |
+| `token-error`  | `{ reason, message, retryable }`              | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type, `retryable` is false for its terminal cases |
+| `presentation` | `{ mode }`                                    | 1     | inline ↔ fullScreen transitions                                                                                   |
 
 `update` carries the loader's **resolved** state, not the partner's raw call:
 the contract's merge semantics (absent key keeps, key present as `undefined`
 clears) are applied by the loader against the state it holds, and the app
 replaces its values wholesale with what arrives. The app never merges.
+
+`appearance` on `init` and `update` is a doola-internal channel, not a partner
+option — branding lives in the partner portal, and the public `update()` carries
+only `locale`. Its consumer is the portal's branding preview, which mounts the app
+the way a loader does and speaks this protocol unchanged: `ready`, `init`, then
+`update { appearance }` for each unsaved draft. It adds no message types — the
+`branding_preview` message in earlier sketches is `update { appearance }`. The
+shape of `appearance` is owned by the branding backend (PENG-6219).
 
 ## Token renewal
 
@@ -90,18 +103,27 @@ living in the partner's page).
    that reason. Never computed from decoding the JWT.
 2. On fire, loader calls `fetchAccessToken()` and posts `token` in.
 3. Reactive backstop: app hits a 401 (throttled timers in backgrounded tabs),
-   posts `token-request`, loader renews on demand.
+   posts `token-request`, loader renews on demand. The reply is `token` — or,
+   when the renewal cannot succeed, `token-error` (step 4), so the frame is
+   never left waiting.
 4. A `fetchAccessToken` rejection is mapped by the loader from the `status` the
    rejection exposes (the convention lives in the contract, on
    `FetchAccessToken`):
    - `401` → `onAuthError({ type: 'partner_session_expired', message: … })`,
-     and the loader stops retrying — the partner's own user session died.
-     Only the partner's own 401 can reach the loader — the route rule
-     lives on `FetchAccessToken` in the contract; a broken `dk_` key
+     and the loader stops retrying on its own — automatic renewal ends, but a
+     `token-request` from the frame (a user-initiated try-again after logging
+     back in with the partner) is still honoured. The partner's own user
+     session died. Only the partner's own 401 can reach the loader — the route
+     rule lives on `FetchAccessToken` in the contract; a broken `dk_` key
      lands in `mint_failed`/`renewal_failed`, never here.
    - `409` → `onAuthError({ type: 'email_in_use', message: … })`, also
      terminal. First mint only; cannot occur on renewal.
    - anything else → `mint_failed` on first mint, `renewal_failed` on renewal.
+
+   In every case the loader also posts `token-error` into every mounted frame
+   with the same `reason`, so the app can render the state instead of hanging
+   on an unanswered `token-request`. `onAuthError` fires each time as well —
+   the contract makes it idempotent for that reason.
 
    Semantics and the partner's expected response are owned by the contract
    (see `DoolaAuthError`).

@@ -29,6 +29,9 @@ contract wins and this file has the bug.
 | `render_error`          | The component could not render — commonly browser extensions or CSP.               |
 | `api_error`             | Everything else, including doola 5xx.                                              |
 
-Handlers may be called more than once per incident and must be idempotent.
-In most cases the component renders its own error UI; `onLoadError` exists for the
-partner's analytics and for anything on _their_ page that depends on the frame.
+Both handlers may be called more than once per incident and must be idempotent —
+`onAuthError` fires on every failed fetch (first mint, each automatic retry, each
+`token-request` from the frame), so a redirect to the partner's login inside it
+will be triggered repeatedly. In most cases the component renders its own error
+UI; `onLoadError` exists for the partner's analytics and for anything on _their_
+page that depends on the frame.
