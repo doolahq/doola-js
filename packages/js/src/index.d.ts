@@ -95,34 +95,6 @@ export interface DoolaLoadError {
   message: string;
 }
 
-/** The token set {@link Appearance} can override. All values are CSS strings. */
-export interface AppearanceVariables {
-  colorPrimary?: string | undefined;
-  colorBackground?: string | undefined;
-  colorText?: string | undefined;
-  colorDanger?: string | undefined;
-  fontFamily?: string | undefined;
-  borderRadius?: string | undefined;
-  spacingUnit?: string | undefined;
-}
-
-/**
- * Runtime appearance overrides.
- *
- * The canonical branding — logo, colors, typography — is configured in
- * the partner portal and served inside the iframe document itself, so it
- * applies before first paint with no flash. This object is a narrow
- * runtime override on top of that, mirroring the portal's token set.
- * It cannot reference doola's internal DOM: no selectors, no CSS.
- *
- * The `| undefined` unions here are contract-bearing, not style: passing
- * a key as explicit `undefined` to {@link Doola.update} is the signal
- * that clears an override.
- */
-export interface Appearance {
-  variables?: AppearanceVariables | undefined;
-}
-
 /**
  * How the frame presents on constrained viewports.
  *
@@ -159,7 +131,13 @@ export interface DoolaOptions {
 
   fetchAccessToken: FetchAccessToken;
 
-  /** MUST be handled — see {@link DoolaAuthError} for each case and the expected response. */
+  /**
+   * MUST be handled — see {@link DoolaAuthError} for each case and the
+   * expected response. Fires on every failed fetch, not once per
+   * incident: the first mint, then each automatic retry and each
+   * `token-request` from the frame. Handlers must be idempotent — a
+   * redirect to your login must tolerate being triggered more than once.
+   */
   onAuthError: (error: DoolaAuthError) => void;
 
   /**
@@ -200,10 +178,14 @@ export interface DoolaOptions {
    */
   origin?: string | undefined;
 
-  appearance?: Appearance | undefined;
   presentation?: Presentation | undefined;
 
-  /** BCP 47 tag. v1 supports `en` only; the option exists so adding locales is not a breaking change. */
+  /**
+   * BCP 47 tag. v1 supports `en` only; the option exists so adding locales
+   * is not a breaking change. Branding itself is not an option here — it
+   * is configured once in the partner portal and served inside the frame,
+   * so every page embedding a partner renders that partner the same way.
+   */
   locale?: string | undefined;
 }
 
@@ -231,12 +213,13 @@ export interface Doola {
   create(): DoolaComponent;
 
   /**
-   * Runtime updates. Only `appearance` and `locale` can change after
-   * init. Merge semantics, per key: a key absent from the call keeps its
-   * current value; a key present with the value `undefined` clears the
-   * override back to the portal-configured default.
+   * Runtime updates. Only `locale` can change after init. Merge
+   * semantics, per key: a key absent from the call keeps its current
+   * value; a key present with the value `undefined` clears it back to the
+   * default. The `| undefined` on the option is contract-bearing for
+   * exactly this reason, not style.
    */
-  update(options: Pick<DoolaOptions, 'appearance' | 'locale'>): void;
+  update(options: Pick<DoolaOptions, 'locale'>): void;
 
   /**
    * Tears down every component and the session. Call on the partner
