@@ -110,7 +110,8 @@ living in the partner's page).
    never left waiting.
 4. A `fetchAccessToken` rejection is mapped by the loader from the `status` the
    rejection exposes (the convention lives in the contract, on
-   `FetchAccessToken`):
+   `FetchAccessToken`); a synchronous throw is treated as a rejection with no
+   `status`:
    - `401` → `onAuthError({ type: 'partner_session_expired', message: … })`,
      and the loader stops retrying on its own — automatic renewal ends, but a
      `token-request` from the frame (a user-initiated try-again after logging

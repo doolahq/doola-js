@@ -142,6 +142,7 @@ function init(options: DoolaOptions): Doola {
   return instance;
 }
 
-// First evaluation wins: a second copy of this script (a partner tag plus
-// the shim's, say) must not swap in a fresh module with its own live-latch.
+// First evaluation wins, permanently: @doola/js injects this script
+// unconditionally, so every published shim relies on a second evaluation
+// keeping the first window.Doola (CONTRIBUTING.md). Never `=`.
 window.Doola ??= { init };

@@ -37,14 +37,13 @@ function injectLoader(): Promise<DoolaGlobal> {
 
   if (window.Doola) return Promise.resolve(window.Doola);
 
-  // Always our own tag, even if the page already carries one: a foreign tag
-  // that has finished (or failed) would never fire our listeners and the
-  // promise would hang. A second evaluation of the loader is harmless — it
-  // keeps the first `window.Doola` — so injecting again is the safe path.
+  // Never adopt a tag we did not inject: a finished or failed foreign tag
+  // fires no listeners. Re-evaluating the loader is safe (CONTRIBUTING.md,
+  // "the loader outlives every published contract version").
   loaderPromise ??= new Promise((resolve, reject) => {
     const script = document.createElement('script');
 
-    // On failure the tag goes too, so a retry injects afresh.
+    // Failed tags do not stay in <head>.
     const fail = (error: Error) => {
       script.remove();
       loaderPromise = null;
@@ -75,8 +74,8 @@ function injectLoader(): Promise<DoolaGlobal> {
  * components. One live instance per page: a repeat call with the same
  * publishableKey resolves to the live instance and its other options
  * are ignored, so a React StrictMode double-invoke gets the instance
- * back, not an error. A different key rejects until destroy(). The
- * script itself is never re-injected.
+ * back, not an error. A different key rejects until destroy(). Once
+ * the loader is present the script is never re-injected.
  */
 export async function loadDoola(options: DoolaOptions): Promise<Doola> {
   const loader = await injectLoader();

@@ -119,38 +119,38 @@ export class SessionManager {
 
     // Collapse concurrent callers (several components mounting at once,
     // or the proactive timer racing the 401 backstop) into one fetch.
-    // Partner code: a synchronous throw must land in the same .catch as a
-    // rejection, not escape a message handler as an uncaught exception.
-    const pending = (this.pending ??= Promise.resolve()
-      .then(() => this.fetchAccessToken())
-      .then((session) => {
-        this.pending = null;
-        if (this.stopped) return session;
+    return (this.pending ??= this.mint(fallback));
+  }
 
-        const now = Date.now();
-        const ttlMs = session.expiresIn * 1_000;
-        const active: ActiveSession = {
-          session,
-          renewAt: now + ttlMs * RENEWAL_FRACTION,
-          staleAt: now + ttlMs - STALENESS_MARGIN_MS,
-        };
-        this.active = active;
+  // async on purpose: a synchronous throw from partner code becomes a
+  // rejection, so the catch below — the only path that delivers onAuthError
+  // and token-error — always runs.
+  private async mint(fallback: DoolaAuthError['type']): Promise<CustomerSession> {
+    try {
+      const session = await this.fetchAccessToken();
+      if (this.stopped) return session;
 
-        if (!this.paused) this.schedule(active);
-        this.onSession(session);
+      const now = Date.now();
+      const ttlMs = session.expiresIn * 1_000;
+      const active: ActiveSession = {
+        session,
+        renewAt: now + ttlMs * RENEWAL_FRACTION,
+        staleAt: now + ttlMs - STALENESS_MARGIN_MS,
+      };
+      this.active = active;
 
-        return session;
-      })
-      .catch((error: unknown) => {
-        this.pending = null;
+      if (!this.paused) this.schedule(active);
+      this.onSession(session);
 
-        const type = classifyRejection(error, fallback);
-        this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
+      return session;
+    } catch (error: unknown) {
+      const type = classifyRejection(error, fallback);
+      this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
 
-        throw error;
-      }));
-
-    return pending;
+      throw error;
+    } finally {
+      this.pending = null;
+    }
   }
 
   /**

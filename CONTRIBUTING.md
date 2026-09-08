@@ -29,7 +29,10 @@ This section is the canonical definition; everything else in the repo points her
   `/v1/doola.js`. A true break is a new loader path (`/v2/doola.js`) with a
   new npm major pointing at it, while `/v1/` keeps serving the old contract
   until telemetry shows no live traffic on it and the sunset has been
-  communicated.
+  communicated. One concrete instance: the shim injects the loader script
+  unconditionally, so the loader's `window.Doola ??= { init }` — first
+  evaluation wins — is part of the contract with every shim ever published,
+  not a local nicety.
 - **Internal but versioned:** `docs/protocol.md`. Partners never touch it, but
   the loader and the embedded app deploy independently, so it carries its own
   version and both sides support N−1.

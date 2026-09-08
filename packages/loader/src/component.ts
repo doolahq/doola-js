@@ -47,7 +47,8 @@ export interface FrameConfig {
  * The page's scroll lock is one global shared by every full-screen frame:
  * saved when the first enters, restored when the last leaves. A per-frame
  * snapshot would let one frame's exit unlock the page behind another's
- * still-live overlay.
+ * still-live overlay. Module scope rather than FrameConfig because the
+ * thing guarded, document.documentElement, outlives any instance.
  */
 let fullScreenFrames = 0;
 let overflowBeforeFullScreen = '';
