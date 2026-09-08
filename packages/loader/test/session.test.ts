@@ -107,6 +107,20 @@ describe('SessionManager', () => {
     );
   });
 
+  it('routes a synchronous throw from fetchAccessToken through onAuthError like a rejection', async () => {
+    const onAuthError = vi.fn();
+    const manager = new SessionManager(
+      vi.fn(() => {
+        throw new Error('sync');
+      }),
+      onAuthError,
+      vi.fn(),
+    );
+
+    await expect(manager.current()).rejects.toThrow('sync');
+    expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type: 'mint_failed' }));
+  });
+
   it('maps a 409 rejection to email_in_use', async () => {
     const onAuthError = vi.fn();
     const manager = new SessionManager(

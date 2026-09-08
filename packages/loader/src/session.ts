@@ -119,7 +119,10 @@ export class SessionManager {
 
     // Collapse concurrent callers (several components mounting at once,
     // or the proactive timer racing the 401 backstop) into one fetch.
-    const pending = (this.pending ??= this.fetchAccessToken()
+    // Partner code: a synchronous throw must land in the same .catch as a
+    // rejection, not escape a message handler as an uncaught exception.
+    const pending = (this.pending ??= Promise.resolve()
+      .then(() => this.fetchAccessToken())
       .then((session) => {
         this.pending = null;
         if (this.stopped) return session;

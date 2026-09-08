@@ -44,6 +44,26 @@ export interface FrameConfig {
 }
 
 /**
+ * The page's scroll lock is one global shared by every full-screen frame:
+ * saved when the first enters, restored when the last leaves. A per-frame
+ * snapshot would let one frame's exit unlock the page behind another's
+ * still-live overlay.
+ */
+let fullScreenFrames = 0;
+let overflowBeforeFullScreen = '';
+
+function lockPageScroll(): void {
+  if (fullScreenFrames++ === 0) {
+    overflowBeforeFullScreen = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+  }
+}
+
+function unlockPageScroll(): void {
+  if (--fullScreenFrames === 0) document.documentElement.style.overflow = overflowBeforeFullScreen;
+}
+
+/**
  * One shared window listener for all mounted frames, dispatched by
  * event.source. Keeps message handling O(1) in the number of mounted
  * components and independent of other iframes' postMessage traffic.
@@ -201,13 +221,12 @@ export class FrameController {
       const iframe = this.iframe;
       if (!iframe) return;
 
-      const previousOverflow = document.documentElement.style.overflow;
       iframe.style.cssText = FULLSCREEN_FRAME_CSS;
-      document.documentElement.style.overflow = 'hidden';
+      lockPageScroll();
 
       this.restoreStyles = () => {
         iframe.style.cssText = INLINE_FRAME_CSS;
-        document.documentElement.style.overflow = previousOverflow;
+        unlockPageScroll();
         this.restoreStyles = null;
       };
       this.post({ type: 'presentation', payload: { mode: 'fullScreen' } });

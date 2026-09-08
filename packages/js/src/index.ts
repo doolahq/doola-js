@@ -37,15 +37,16 @@ function injectLoader(): Promise<DoolaGlobal> {
 
   if (window.Doola) return Promise.resolve(window.Doola);
 
+  // Always our own tag, even if the page already carries one: a foreign tag
+  // that has finished (or failed) would never fire our listeners and the
+  // promise would hang. A second evaluation of the loader is harmless — it
+  // keeps the first `window.Doola` — so injecting again is the safe path.
   loaderPromise ??= new Promise((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(`script[src="${LOADER_URL}"]`);
-    const script = existing ?? document.createElement('script');
+    const script = document.createElement('script');
 
-    // On failure, a tag this shim injected must go too: the next attempt's
-    // querySelector would otherwise find the dead tag, skip injection, and
-    // never settle. A partner-added tag is theirs — never removed here.
+    // On failure the tag goes too, so a retry injects afresh.
     const fail = (error: Error) => {
-      if (!existing) script.remove();
+      script.remove();
       loaderPromise = null;
       reject(error);
     };
@@ -60,11 +61,9 @@ function injectLoader(): Promise<DoolaGlobal> {
       );
     });
 
-    if (!existing) {
-      script.src = LOADER_URL;
-      script.async = true;
-      document.head.appendChild(script);
-    }
+    script.src = LOADER_URL;
+    script.async = true;
+    document.head.appendChild(script);
   });
 
   return loaderPromise;
