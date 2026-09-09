@@ -7,6 +7,11 @@ import type { CustomerSession, DoolaAuthError, DoolaLoadError } from '@doola/js'
  */
 export const PROTOCOL_VERSION = 1;
 
+/** The version both sides speak: min(loaderMax, appMax) — docs/protocol.md, Envelope. */
+export function negotiate(protocolMax: number): number {
+  return Math.min(PROTOCOL_VERSION, protocolMax);
+}
+
 export type AppMessage =
   | { type: 'ready'; payload: { protocolMax: number } }
   | { type: 'resize'; payload: { height: number } }
@@ -44,45 +49,45 @@ const RETRYABLE: Record<DoolaAuthError['type'], boolean> = {
   renewal_failed: true,
 };
 
-export function tokenError(error: DoolaAuthError): Extract<LoaderMessage, { type: 'token-error' }> {
-  return {
-    type: 'token-error',
-    payload: { reason: error.type, message: error.message, retryable: RETRYABLE[error.type] },
-  };
-}
-
-const isPositiveInt = (x: unknown): x is number => Number.isInteger(x) && (x as number) > 0;
-const isFiniteNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
-const isNonEmptyString = (x: unknown): x is string => typeof x === 'string' && x.length > 0;
+/** Exhaustive over the contract's union for the same reason as RETRYABLE. */
+const LOAD_ERROR: Record<DoolaLoadError['type'], true> = {
+  api_connection_error: true,
+  authentication_error: true,
+  invalid_request_error: true,
+  render_error: true,
+  api_error: true,
+};
 
 const AUTH_ERROR_TYPES: ReadonlySet<string> = new Set(Object.keys(RETRYABLE));
-const LOAD_ERROR_TYPES: ReadonlySet<string> = new Set<DoolaLoadError['type']>([
-  'api_connection_error',
-  'authentication_error',
-  'invalid_request_error',
-  'render_error',
-  'api_error',
-]);
+const LOAD_ERROR_TYPES: ReadonlySet<string> = new Set(Object.keys(LOAD_ERROR));
 
 type Payload = Record<string, unknown>;
+type ShapeCheck = (payload: Payload) => boolean;
+
+const isFiniteNumber = (x: unknown): x is number => Number.isFinite(x);
+const isPositiveInt = (x: unknown): x is number =>
+  isFiniteNumber(x) && Number.isInteger(x) && x > 0;
+const isNonEmptyString = (x: unknown): x is string => typeof x === 'string' && x.length > 0;
+const isTaggedError =
+  (types: ReadonlySet<string>): ShapeCheck =>
+  (p) =>
+    typeof p.type === 'string' && types.has(p.type) && typeof p.message === 'string';
 
 /**
- * The payload shape each app message must have to be acted on. What the
- * app sends reaches partner code (`formed`) and arithmetic (`ready`), so
- * the envelope alone is not enough; a payload that fails is dropped like
- * an unknown type. Exhaustive over AppMessage so a new message must
- * declare its shape.
+ * A required-key check, not a projection: it bounds what the loader acts
+ * on, not what escapes — field-level narrowing for partner-facing payloads
+ * (`formed`) lives at the handler. Exhaustive over AppMessage so a new
+ * message must declare its shape; a payload that fails is dropped like an
+ * unknown type.
  */
-const PAYLOAD_SHAPE: Record<AppMessage['type'], (payload: Payload) => boolean> = {
+const PAYLOAD_SHAPE: Record<AppMessage['type'], ShapeCheck> = {
   ready: (p) => isPositiveInt(p.protocolMax),
   resize: (p) => isFiniteNumber(p.height) && p.height >= 0,
   'scroll-request': (p) => isFiniteNumber(p.top),
   'token-request': () => true,
   formed: (p) => isNonEmptyString(p.companyId),
-  'auth-error': (p) =>
-    typeof p.type === 'string' && AUTH_ERROR_TYPES.has(p.type) && typeof p.message === 'string',
-  'load-error': (p) =>
-    typeof p.type === 'string' && LOAD_ERROR_TYPES.has(p.type) && typeof p.message === 'string',
+  'auth-error': isTaggedError(AUTH_ERROR_TYPES),
+  'load-error': isTaggedError(LOAD_ERROR_TYPES),
   'loader-start': () => true,
 };
 
@@ -94,10 +99,17 @@ export function parseAppMessage(data: unknown): AppMessage | null {
   if (typeof v !== 'number' || v > PROTOCOL_VERSION) return null;
   if (typeof type !== 'string' || typeof payload !== 'object' || payload === null) return null;
 
-  const hasShape = (PAYLOAD_SHAPE as Record<string, (payload: Payload) => boolean>)[type];
+  const hasShape = (PAYLOAD_SHAPE as Record<string, ShapeCheck>)[type];
   if (!hasShape?.(payload as Payload)) return null;
 
   return data as AppMessage;
+}
+
+export function tokenError(error: DoolaAuthError): Extract<LoaderMessage, { type: 'token-error' }> {
+  return {
+    type: 'token-error',
+    payload: { reason: error.type, message: error.message, retryable: RETRYABLE[error.type] },
+  };
 }
 
 export function envelope(message: LoaderMessage): Envelope {

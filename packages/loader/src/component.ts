@@ -1,6 +1,6 @@
 import type { DoolaOptions } from '@doola/js';
 
-import { envelope, parseAppMessage, PROTOCOL_VERSION, type LoaderMessage } from './protocol';
+import { envelope, negotiate, parseAppMessage, type LoaderMessage } from './protocol';
 import type { SessionManager } from './session';
 
 const INLINE_FRAME_CSS = 'width:100%;border:0;display:block;height:0;';
@@ -174,7 +174,7 @@ export class FrameController {
               type: 'init',
               payload: {
                 session,
-                protocol: Math.min(PROTOCOL_VERSION, message.payload.protocolMax),
+                protocol: negotiate(message.payload.protocolMax),
                 locale: this.config.state.locale,
               },
             }),

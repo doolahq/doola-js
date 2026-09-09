@@ -27,10 +27,11 @@ Every message, both directions:
 ```
 
 An unknown `type` is ignored, never an error — and so is a known `type` whose
-payload does not have the shape in the tables below: the loader validates payloads
-at the parse boundary (`companyId` a non-empty string, `protocolMax` a positive
-integer, error `type`s from the contract's unions) and drops what fails, because
-those values reach partner code and arithmetic. Version negotiation happens once,
+payload does not match its `payload` column below: each side validates what it
+receives before acting on it, and drops what fails exactly like an unknown type.
+For `ready` that means a malformed handshake leaves the frame without `init`, which
+is deliberate — a peer that cannot form a valid `ready` is not handed a session.
+Version negotiation happens once,
 up front, in the `ready`/`init` handshake: `ready` carries the app's
 `protocolMax`, `init` replies with the `protocol` both sides then speak —
 `min(loaderMax, appMax)`. There is no other downgrade mechanism.
@@ -58,16 +59,16 @@ up front, in the `ready`/`init` handshake: `ready` carries the app's
 
 ## Messages: app → loader
 
-| type             | payload             | since | notes                                                                                                                          |
-| ---------------- | ------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `ready`          | `{ protocolMax }`   | 1     | app booted; the one message allowed targetOrigin `"*"`; loader replies with `init`                                             |
-| `resize`         | `{ height }`        | 1     | from a ResizeObserver on the app root; coalesced to one post per animation frame, skipped when equal to the last posted height |
-| `scroll-request` | `{ top }`           | 1     | app asks the parent page to scroll a point into view                                                                           |
-| `token-request`  | `{}`                | 1     | backstop path: app got a 401 mid-session                                                                                       |
-| `formed`         | `{ companyId }`     | 1     | loader forwards to the partner's `onFormed` — **only the id, nothing else** (see the contract)                                 |
-| `auth-error`     | `{ type, message }` | 1     | loader forwards to `onAuthError`                                                                                               |
-| `load-error`     | `{ type, message }` | 1     | loader forwards to `onLoadError`                                                                                               |
-| `loader-start`   | `{}`                | 1     | first paint inside the frame                                                                                                   |
+| type             | payload                                             | since | notes                                                                                                                          |
+| ---------------- | --------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `ready`          | `{ protocolMax: int ≥ 1 }`                          | 1     | app booted; the one message allowed targetOrigin `"*"`; loader replies with `init`                                             |
+| `resize`         | `{ height: number ≥ 0 }`                            | 1     | from a ResizeObserver on the app root; coalesced to one post per animation frame, skipped when equal to the last posted height |
+| `scroll-request` | `{ top: number }`                                   | 1     | app asks the parent page to scroll a point into view                                                                           |
+| `token-request`  | `{}`                                                | 1     | backstop path: app got a 401 mid-session                                                                                       |
+| `formed`         | `{ companyId: non-empty string }`                   | 1     | loader forwards to the partner's `onFormed` — **only the id, nothing else** (see the contract)                                 |
+| `auth-error`     | `{ type: DoolaAuthError['type'], message: string }` | 1     | loader forwards to `onAuthError`                                                                                               |
+| `load-error`     | `{ type: DoolaLoadError['type'], message: string }` | 1     | loader forwards to `onLoadError`                                                                                               |
+| `loader-start`   | `{}`                                                | 1     | first paint inside the frame                                                                                                   |
 
 ## Messages: mounting peer → app
 

@@ -59,6 +59,9 @@ export class SessionManager {
   // Starts paused: a mint must not begin a renewal loop on a page that
   // never mounts a frame. resume() runs on first mount.
   private paused = true;
+  // Set by stop(). A fetch already in flight then settles silently: nothing
+  // cached, nothing scheduled, no callback either way — the partner asked
+  // for teardown, not for whatever the result would otherwise imply.
   private stopped = false;
 
   constructor(
@@ -144,12 +147,10 @@ export class SessionManager {
 
       return session;
     } catch (error: unknown) {
-      // After stop() the partner asked for teardown, not a redirect: an
-      // in-flight fetch that fails now reports to nobody. Callers still settle.
-      if (!this.stopped) {
-        const type = classifyRejection(error, fallback);
-        this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
-      }
+      if (this.stopped) throw error;
+
+      const type = classifyRejection(error, fallback);
+      this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
 
       throw error;
     } finally {

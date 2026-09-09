@@ -7,6 +7,13 @@ describe('parseAppMessage', () => {
     const msg = parseAppMessage({ v: PROTOCOL_VERSION, type: 'resize', payload: { height: 640 } });
     expect(msg?.type).toBe('resize');
     expect(msg?.payload).toEqual({ height: 640 });
+
+    expect(
+      parseAppMessage({ v: PROTOCOL_VERSION, type: 'formed', payload: { companyId: 'c_1' } }),
+    ).not.toBeNull();
+    expect(
+      parseAppMessage({ v: PROTOCOL_VERSION, type: 'ready', payload: { protocolMax: 2 } }),
+    ).not.toBeNull();
   });
 
   it('rejects a message from a future protocol version', () => {
@@ -30,14 +37,9 @@ describe('parseAppMessage', () => {
       { type: 'auth-error', payload: { type: 'not_a_case', message: 'x' } },
       { type: 'load-error', payload: { type: 'api_error', message: 42 } },
     ];
-    for (const m of bad) expect(parseAppMessage({ v: PROTOCOL_VERSION, ...m })).toBeNull();
-
-    expect(
-      parseAppMessage({ v: PROTOCOL_VERSION, type: 'formed', payload: { companyId: 'c_1' } }),
-    ).not.toBeNull();
-    expect(
-      parseAppMessage({ v: PROTOCOL_VERSION, type: 'ready', payload: { protocolMax: 2 } }),
-    ).not.toBeNull();
+    for (const m of bad) {
+      expect(parseAppMessage({ v: PROTOCOL_VERSION, ...m }), JSON.stringify(m)).toBeNull();
+    }
   });
 
   it('rejects non-envelope junk without throwing', () => {
