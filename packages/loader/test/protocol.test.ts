@@ -19,6 +19,27 @@ describe('parseAppMessage', () => {
     ).not.toBeNull();
   });
 
+  it('drops a known type whose payload has the wrong shape', () => {
+    const bad = [
+      { type: 'ready', payload: { protocolMax: 'x' } },
+      { type: 'ready', payload: { protocolMax: 0 } },
+      { type: 'ready', payload: { protocolMax: 1.5 } },
+      { type: 'formed', payload: { companyId: 123 } },
+      { type: 'formed', payload: { companyId: '' } },
+      { type: 'resize', payload: { height: Number.NaN } },
+      { type: 'auth-error', payload: { type: 'not_a_case', message: 'x' } },
+      { type: 'load-error', payload: { type: 'api_error', message: 42 } },
+    ];
+    for (const m of bad) expect(parseAppMessage({ v: PROTOCOL_VERSION, ...m })).toBeNull();
+
+    expect(
+      parseAppMessage({ v: PROTOCOL_VERSION, type: 'formed', payload: { companyId: 'c_1' } }),
+    ).not.toBeNull();
+    expect(
+      parseAppMessage({ v: PROTOCOL_VERSION, type: 'ready', payload: { protocolMax: 2 } }),
+    ).not.toBeNull();
+  });
+
   it('rejects non-envelope junk without throwing', () => {
     for (const junk of [
       null,

@@ -156,6 +156,20 @@ describe('SessionManager', () => {
     expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type: 'mint_failed' }));
   });
 
+  it('a fetch that fails after stop() reaches nobody', async () => {
+    let reject: (e: unknown) => void = () => {};
+    const fetch = vi.fn(() => new Promise<never>((_, r) => (reject = r)));
+    const onAuthError = vi.fn();
+    const manager = new SessionManager(fetch, onAuthError, vi.fn());
+
+    const pending = manager.current();
+    manager.stop();
+    reject({ status: 401 });
+
+    await expect(pending).rejects.toBeDefined();
+    expect(onAuthError).not.toHaveBeenCalled();
+  });
+
   it('stop() cancels the pending renewal', async () => {
     const fetch = vi.fn().mockResolvedValue(session(TEN_MINUTES_S));
     const manager = new SessionManager(fetch, vi.fn(), vi.fn());

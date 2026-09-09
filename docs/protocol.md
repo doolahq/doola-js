@@ -26,7 +26,11 @@ Every message, both directions:
 { "v": 1, "type": "…", "payload": {} }
 ```
 
-An unknown `type` is ignored, never an error. Version negotiation happens once,
+An unknown `type` is ignored, never an error — and so is a known `type` whose
+payload does not have the shape in the tables below: the loader validates payloads
+at the parse boundary (`companyId` a non-empty string, `protocolMax` a positive
+integer, error `type`s from the contract's unions) and drops what fails, because
+those values reach partner code and arithmetic. Version negotiation happens once,
 up front, in the `ready`/`init` handshake: `ready` carries the app's
 `protocolMax`, `init` replies with the `protocol` both sides then speak —
 `min(loaderMax, appMax)`. There is no other downgrade mechanism.

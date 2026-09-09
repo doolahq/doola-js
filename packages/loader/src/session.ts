@@ -144,8 +144,12 @@ export class SessionManager {
 
       return session;
     } catch (error: unknown) {
-      const type = classifyRejection(error, fallback);
-      this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
+      // After stop() the partner asked for teardown, not a redirect: an
+      // in-flight fetch that fails now reports to nobody. Callers still settle.
+      if (!this.stopped) {
+        const type = classifyRejection(error, fallback);
+        this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
+      }
 
       throw error;
     } finally {
