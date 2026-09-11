@@ -3,6 +3,11 @@
 **Protocol version: 1.** This document is the version declaration; the `since`
 column in the message tables records the version each message was added in.
 
+Both sides implement it through one package, `@doola/sdk-protocol`
+(`packages/protocol`), which holds the message types, the inbound validators
+and the outbound payload projections. This document remains the specification:
+where the two disagree, the package has the bug.
+
 The contract between the loader (partner's page, doola code) and the embedded app
 (the SDK origin, inside the iframe). Internal to doola — partners never touch this —
 but versioned like a public API because **the two sides deploy independently**:

@@ -1,0 +1,36 @@
+import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION } from './messages';
+import type { AppMessage, LoaderMessage } from './messages';
+import { APP_SPEC, LOADER_SPEC, acceptsAll, type Spec } from './spec';
+
+function parse<T>(data: unknown, spec: Spec): T | null {
+  if (typeof data !== 'object' || data === null) return null;
+
+  const { v, type, payload } = data as { v?: unknown; type?: unknown; payload?: unknown };
+  if (typeof v !== 'number' || v > PROTOCOL_VERSION || v < MIN_SUPPORTED_VERSION) return null;
+  if (typeof type !== 'string') return null;
+  if (typeof payload !== 'object' || payload === null) return null;
+
+  const fields = spec[type];
+  if (!fields) return null;
+
+  if (!acceptsAll(fields)(payload)) return null;
+
+  return data as T;
+}
+
+/**
+ * For the mounting peer: a message the app sent, or `null`.
+ *
+ * Null covers every way a message can be unusable — unknown type, malformed
+ * payload, a version outside the supported window — because there is nothing
+ * useful either side can do differently between those cases, and throwing
+ * would turn a stray `postMessage` from any script on the page into a crash.
+ */
+export function parseAppMessage(data: unknown): AppMessage | null {
+  return parse<AppMessage>(data, APP_SPEC);
+}
+
+/** For the app: a message the mounting peer sent, or `null`. */
+export function parseLoaderMessage(data: unknown): LoaderMessage | null {
+  return parse<LoaderMessage>(data, LOADER_SPEC);
+}

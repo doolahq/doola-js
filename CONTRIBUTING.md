@@ -33,9 +33,12 @@ This section is the canonical definition; everything else in the repo points her
   unconditionally, so the loader's `window.Doola ??= { init }` — first
   evaluation wins — is part of the contract with every shim ever published,
   not a local nicety.
-- **Internal but versioned:** `docs/protocol.md`. Partners never touch it, but
+- **Internal but versioned:** `docs/protocol.md`, implemented by
+  `packages/protocol` (`@doola/sdk-protocol`). Partners never touch either, but
   the loader and the embedded app deploy independently, so it carries its own
-  version and both sides support N−1.
+  version and both sides support N−1. The package is published for one reason:
+  the app lives in `doolahq/doola-sdk-app`, and a wire format maintained in two
+  repositories drifts. `docs/protocol.md` states which of the two wins.
 
 ## Conventions
 
@@ -47,5 +50,7 @@ This section is the canonical definition; everything else in the repo points her
 
 ## What does not live here
 
-The embedded application (served from the SDK origin) and the loader's deployed
-bundle are built elsewhere. This repo defines the contract and ships the npm shim.
+The embedded application (served from the SDK origin) is built in
+`doolahq/doola-sdk-app`, and the loader's deployed bundle is published from
+here by CI rather than committed. This repo defines the contract, ships the npm
+shim, and owns the protocol both sides speak.

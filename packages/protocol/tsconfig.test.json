@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Confined to the test program: the tests read docs/protocol.md and bundle
+    // the package to measure it, so they need Node's types — src must not.
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "include": ["src", "test"]
+}
