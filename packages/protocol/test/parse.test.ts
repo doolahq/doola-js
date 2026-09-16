@@ -24,6 +24,13 @@ describe.each(DIRECTIONS)('$name', ({ parse, messages }) => {
     expect(parse({ v: PROTOCOL_VERSION + 1, ...valid })).toBeNull();
     expect(parse({ v: MIN_SUPPORTED_VERSION - 1, ...valid })).toBeNull();
     expect(parse({ v: MIN_SUPPORTED_VERSION, ...valid })).not.toBeNull();
+
+    // NaN is a number and every comparison with it is false, so a bare range
+    // check passes it through both bounds. Infinities and fractions name no
+    // version either.
+    for (const v of [NaN, Infinity, -Infinity, 1.5]) {
+      expect(parse({ v, ...valid }), `v: ${v} was accepted`).toBeNull();
+    }
   });
 
   it('refuses junk that is not an envelope', () => {
@@ -74,6 +81,7 @@ describe('parseLoaderMessage payload rules', () => {
       { reason: 'vibes', message: 'x', retryable: true },
     ],
     ['mode is not a resolved mode', 'presentation', { mode: 'auto' }],
+    ['the payload is an array', 'update', []],
     [
       'init presentation is not a resolved mode',
       'init',

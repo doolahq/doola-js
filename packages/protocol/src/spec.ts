@@ -119,7 +119,10 @@ const SESSION_FIELDS: FieldsOf<CustomerSession> = {
 export const acceptsAll =
   (fields: Record<string, Field>) =>
   (value: unknown): boolean => {
-    if (typeof value !== 'object' || value === null) return false;
+    // Arrays are objects, and `every` over an empty field table is vacuously
+    // true — so without this, every message whose payload is `{}` or entirely
+    // optional accepts `payload: []`.
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 
     const values = value as Payload;
     return Object.keys(fields).every((name) => fields[name]?.accepts(values[name]));

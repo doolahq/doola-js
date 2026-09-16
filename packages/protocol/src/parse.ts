@@ -6,7 +6,11 @@ function parse<T>(data: unknown, spec: Spec): T | null {
   if (typeof data !== 'object' || data === null) return null;
 
   const { v, type, payload } = data as { v?: unknown; type?: unknown; payload?: unknown };
-  if (typeof v !== 'number' || v > PROTOCOL_VERSION || v < MIN_SUPPORTED_VERSION) return null;
+  // Integer, not just number: NaN is a number and every comparison with it is
+  // false, so a bare range check lets `v: NaN` through both bounds. This also
+  // rejects infinities and fractional versions, none of which name a version.
+  if (typeof v !== 'number' || !Number.isInteger(v)) return null;
+  if (v > PROTOCOL_VERSION || v < MIN_SUPPORTED_VERSION) return null;
   if (typeof type !== 'string') return null;
   if (typeof payload !== 'object' || payload === null) return null;
 
