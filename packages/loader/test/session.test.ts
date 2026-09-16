@@ -197,3 +197,49 @@ describe('SessionManager', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('parseSession', () => {
+  it('rejects a session the app would reject, before it reaches the frame', async () => {
+    // The app's isSession requires a non-empty accessToken; a session that
+    // fails there drops the whole init and the frame connects forever.
+    const fetch = vi.fn().mockResolvedValue({ token: 'cs_test_token', expiresIn: 600 });
+    const onAuthError = vi.fn();
+    const manager = new SessionManager(fetch, onAuthError, vi.fn());
+
+    await expect(manager.current()).rejects.toThrow(/accessToken/);
+    expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type: 'mint_failed' }));
+  });
+
+  it('forwards only the three documented fields', async () => {
+    const onSession = vi.fn();
+    const manager = new SessionManager(
+      vi.fn().mockResolvedValue({
+        accessToken: 'cs_test_token',
+        expiresIn: 600,
+        expiresAt: '2026-08-31T10:00:00Z',
+        refreshToken: 'must not reach the frame',
+      }),
+      vi.fn(),
+      onSession,
+    );
+
+    expect(await manager.current()).toEqual({
+      accessToken: 'cs_test_token',
+      expiresIn: 600,
+      expiresAt: '2026-08-31T10:00:00Z',
+    });
+    expect(onSession).toHaveBeenCalledWith(
+      expect.not.objectContaining({ refreshToken: expect.anything() }),
+    );
+  });
+
+  it('omits expiresAt rather than sending it as undefined', async () => {
+    const manager = new SessionManager(
+      vi.fn().mockResolvedValue({ accessToken: 'cs_test_token', expiresIn: 600 }),
+      vi.fn(),
+      vi.fn(),
+    );
+
+    expect(Object.keys(await manager.current())).toEqual(['accessToken', 'expiresIn']);
+  });
+});

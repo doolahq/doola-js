@@ -95,6 +95,14 @@ the contract's merge semantics (absent key keeps, key present as `undefined`
 clears) are applied by the loader against the state it holds, and the app
 replaces its values wholesale with what arrives. The app never merges.
 
+**`init` is the complete state snapshot; every other loader→app message is a
+delta.** That is the rule, and it is why nothing is lost when the loader posts
+before the frame can receive: `init` re-reads the session, the locale and the
+presentation mode at handshake time, so a dropped `token` or `presentation` is
+superseded rather than missed. Any future loader→app message carrying state
+rather than an event must therefore also appear on `init`, or a frame that
+mounts after it will never learn that state.
+
 `presentation` on `init` carries the mode the frame is already in, and exists
 because the `presentation` message cannot. The loader decides inline vs. full
 screen when it mounts the iframe, which is before the frame has navigated off

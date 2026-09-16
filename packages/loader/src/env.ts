@@ -20,7 +20,7 @@ export function envFromPublishableKey(publishableKey: string): Env {
 
   if (!env) {
     throw new Error(
-      'Invalid publishableKey: expected a key starting with pk_live_ or pk_test_. ' +
+      'doola: invalid publishableKey — expected a key starting with pk_live_ or pk_test_. ' +
         'Get yours from the doola partner portal. Never use your secret dk_ key in a browser.',
     );
   }

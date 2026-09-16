@@ -113,6 +113,50 @@ export function parseAppMessage(data: unknown): AppMessage | null {
   return data as AppMessage;
 }
 
+/**
+ * The session the partner's `fetchAccessToken` resolved with, checked and
+ * projected — `fetchAccessToken` is the other untrusted boundary, and this is
+ * to it what `parseAppMessage` is to the bus.
+ *
+ * Mirrors the app's `isSession` field for field, deliberately: anything this
+ * accepts and forwards but the app rejects would drop the whole `init` there,
+ * leaving the frame connecting forever with nothing reported on either side.
+ *
+ * `expiresIn` is the load-bearing one. It feeds every deadline, and a
+ * non-numeric value — `expires_in` through a snake_case serializer is the
+ * likely way in — makes the renewal delay NaN, which `Math.max` propagates
+ * instead of applying the floor: `setTimeout(NaN)` then reschedules on the
+ * next tick, a request storm against the partner's own token route.
+ *
+ * Projected rather than passed through so keys the partner's route happens to
+ * return — anything alongside the three documented ones — do not cross into
+ * the frame. The app projects in the other direction for the same reason.
+ */
+export function parseSession(value: unknown): CustomerSession {
+  const reject = (why: string): never => {
+    throw new Error(`doola: fetchAccessToken ${why}.`);
+  };
+
+  if (typeof value !== 'object' || value === null) reject('must resolve with a session object');
+
+  const { accessToken, expiresIn, expiresAt } = value as Record<string, unknown>;
+
+  if (typeof accessToken !== 'string' || accessToken === '')
+    reject('resolved without an accessToken string');
+  if (!Number.isFinite(expiresIn) || (expiresIn as number) <= 0)
+    reject(
+      `resolved with expiresIn ${JSON.stringify(expiresIn)}; expected a positive number of seconds`,
+    );
+  if (expiresAt !== undefined && typeof expiresAt !== 'string')
+    reject(`resolved with a non-string expiresAt ${JSON.stringify(expiresAt)}`);
+
+  return {
+    accessToken: accessToken as string,
+    expiresIn: expiresIn as number,
+    ...(expiresAt === undefined ? {} : { expiresAt: expiresAt as string }),
+  };
+}
+
 export function tokenError(error: DoolaAuthError): Extract<LoaderMessage, { type: 'token-error' }> {
   return {
     type: 'token-error',
@@ -120,14 +164,7 @@ export function tokenError(error: DoolaAuthError): Extract<LoaderMessage, { type
   };
 }
 
-/**
- * `v` is the version the message is spoken in, which is the negotiated one —
- * the same reading `parseAppMessage` applies inbound when it drops anything
- * above this side's maximum. Stamping the sender's maximum instead would mean
- * that the first time the loader ships v2 to an app still on v1, it would
- * answer `ready` with "we speak 1" and then stamp 2 on everything after,
- * which an app mirroring that inbound rule drops.
- */
+/** Stamps the version the message is spoken in — the negotiated one, not this side's max (docs/protocol.md, Envelope). */
 export function envelope(message: LoaderMessage, version: number): Envelope {
   return { v: version, ...message };
 }

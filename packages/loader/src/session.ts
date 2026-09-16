@@ -1,5 +1,7 @@
 import type { CustomerSession, DoolaAuthError, FetchAccessToken } from '@doola/js';
 
+import { parseSession } from './protocol';
+
 /**
  * Renew at this fraction of the token's lifetime. Loader policy,
  * deliberately not part of the public contract (docs/protocol.md).
@@ -130,20 +132,11 @@ export class SessionManager {
   // and token-error — always runs.
   private async mint(fallback: DoolaAuthError['type']): Promise<CustomerSession> {
     try {
-      const session = await this.fetchAccessToken();
+      // Parsed, not trusted: this is the partner's own code and the second
+      // untrusted boundary after the bus. A bad session here is not an error,
+      // it is a renewal loop — see parseSession.
+      const session = parseSession(await this.fetchAccessToken());
       if (this.stopped) return session;
-
-      // Checked rather than trusted, because `expiresIn` feeds every deadline
-      // below and the failure is not an error. A non-numeric one — `expires_in`
-      // through a snake_case serializer is the likely way in — makes ttlMs NaN,
-      // and Math.max propagates NaN instead of applying MIN_RENEWAL_DELAY_MS,
-      // so setTimeout(NaN) reschedules on the next tick: a request storm
-      // against the partner's own token route rather than anything they see.
-      if (!Number.isFinite(session.expiresIn) || session.expiresIn <= 0) {
-        throw new Error(
-          `doola: fetchAccessToken resolved with expiresIn ${JSON.stringify(session.expiresIn)}; expected a positive number of seconds.`,
-        );
-      }
 
       const now = Date.now();
       const ttlMs = session.expiresIn * 1_000;
