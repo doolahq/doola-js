@@ -257,6 +257,15 @@ export class FrameController {
       // negotiated and leave the frame at 0px. Restoring the height measured
       // while inline is also the correct one — the app keeps reporting heights
       // while full screen, and those are measured against a different viewport.
+      //
+      // A frame that mounts already under the breakpoint captures `height:0`,
+      // because it goes full screen before the app has negotiated anything and
+      // `resize` is ignored from then on. Its first return to inline therefore
+      // shows 0px until the next `resize`, which follows within a frame or two
+      // since the app's observer watches documentElement and the viewport just
+      // changed. That is correct, not a gap: the loader never knew an inline
+      // height, and the last full-screen one would be measured against the
+      // wrong viewport. Do not "fix" it by restoring that.
       const inlineStyles = iframe.style.cssText;
 
       iframe.style.cssText = FULLSCREEN_FRAME_CSS;
