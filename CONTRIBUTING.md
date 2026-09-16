@@ -7,7 +7,7 @@ bugs and documentation; API surface changes are driven by the doola team.
 
 This section is the canonical definition; everything else in the repo points here.
 
-- **Public contract:** `packages/js/src/index.d.ts` and `docs/errors.md`. Once
+- **Public contract:** `packages/js/src/types.d.ts` (re-exported by `@doola/js`) and `docs/errors.md`. Once
   partners ship against them, every exported name and documented semantic is
   effectively permanent. Review any change as a public-API change: additive is
   fine, breaking requires a major and a migration note, and removals
@@ -29,7 +29,10 @@ This section is the canonical definition; everything else in the repo points her
   `/v1/doola.js`. A true break is a new loader path (`/v2/doola.js`) with a
   new npm major pointing at it, while `/v1/` keeps serving the old contract
   until telemetry shows no live traffic on it and the sunset has been
-  communicated.
+  communicated. One concrete instance: the shim injects the loader script
+  unconditionally, so the loader's `window.Doola ??= { init }` — first
+  evaluation wins — is part of the contract with every shim ever published,
+  not a local nicety.
 - **Internal but versioned:** `docs/protocol.md`. Partners never touch it, but
   the loader and the embedded app deploy independently, so it carries its own
   version and both sides support N−1.

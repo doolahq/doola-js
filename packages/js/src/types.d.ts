@@ -231,19 +231,3 @@ export interface Doola {
    */
   destroy(): void;
 }
-
-/**
- * Injects the loader script from js.doola.com/v1/doola.js (if not
- * already present) and initializes it. Resolves once the loader is
- * ready to create components.
- *
- * One live instance per page. Calling `loadDoola` again with the SAME
- * `publishableKey` resolves to the live instance — the repeat call's
- * other options are ignored — so a double-invoked effect (React
- * StrictMode runs setup twice in development, on purpose) gets the
- * instance back rather than an error. A call with a DIFFERENT key while
- * an instance is live rejects: two keys means two sessions, and only
- * `destroy()` may end the first. After `destroy()`, any call mints a
- * fresh instance.
- */
-export declare function loadDoola(options: DoolaOptions): Promise<Doola>;

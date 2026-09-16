@@ -5,7 +5,7 @@ Both handlers are passed once, at `loadDoola`; the split is auth versus load,
 not where they are registered.
 
 The type unions and per-case meaning in
-[`packages/js/src/index.d.ts`](../packages/js/src/index.d.ts) are canonical —
+[`packages/js/src/types.d.ts`](../packages/js/src/types.d.ts) are canonical —
 that file ships in the npm package and is what partners see in their IDE. This
 document is the response playbook layered on top; when they disagree, the
 contract wins and this file has the bug.

@@ -82,14 +82,15 @@ Branding — your logo, colors, and typography — is configured once in the
 
 ## Packages
 
-| Package                      | What it is                                                  |
-| ---------------------------- | ----------------------------------------------------------- |
-| [`@doola/js`](./packages/js) | Loader injection + the TypeScript contract. No UI.          |
-| `@doola/react`               | React bindings. Arrives after the core contract stabilizes. |
+| Package                              | What it is                                                                    |
+| ------------------------------------ | ----------------------------------------------------------------------------- |
+| [`@doola/js`](./packages/js)         | Loader injection + the TypeScript contract. No UI.                            |
+| [`@doola/loader`](./packages/loader) | The loader served from `js.doola.com`. Public source; never published to npm. |
+| `@doola/react`                       | React bindings. Arrives after the core contract stabilizes.                   |
 
 ## Repository layout
 
-- [`packages/js/src/index.d.ts`](./packages/js/src/index.d.ts) — the public contract (surface rules in [CONTRIBUTING.md](./CONTRIBUTING.md)).
+- [`packages/js/src/types.d.ts`](./packages/js/src/types.d.ts) — the public contract (surface rules in [CONTRIBUTING.md](./CONTRIBUTING.md)).
 - [`docs/protocol.md`](./docs/protocol.md) — the loader ↔ iframe protocol (internal, versioned).
 - [`docs/errors.md`](./docs/errors.md) — error taxonomy.
 

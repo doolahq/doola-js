@@ -26,10 +26,23 @@ Every message, both directions:
 { "v": 1, "type": "…", "payload": {} }
 ```
 
-An unknown `type` is ignored, never an error. Version negotiation happens once,
+An unknown `type` is ignored, never an error — and so is a known `type` whose
+payload does not match its `payload` column below: each side validates what it
+receives before acting on it, and drops what fails exactly like an unknown type.
+For `ready` that means a malformed handshake leaves the frame without `init`, which
+is deliberate — a peer that cannot form a valid `ready` is not handed a session.
+Version negotiation happens once,
 up front, in the `ready`/`init` handshake: `ready` carries the app's
 `protocolMax`, `init` replies with the `protocol` both sides then speak —
 `min(loaderMax, appMax)`. There is no other downgrade mechanism.
+
+`v` is therefore the version a message is **spoken in**, not the sender's
+maximum: once `init` has settled it, every later message from either side
+carries the negotiated value. This is what makes the receive rule coherent —
+each side drops anything whose `v` is above its own maximum, which would
+otherwise reject its peer's traffic immediately after a successful downgrade.
+Before `init` only `ready` exists, and it carries the app's maximum because
+that is the number being negotiated with.
 
 ## Origin and source checks — both directions, no exceptions
 
@@ -54,33 +67,50 @@ up front, in the `ready`/`init` handshake: `ready` carries the app's
 
 ## Messages: app → loader
 
-| type             | payload             | since | notes                                                                                                                          |
-| ---------------- | ------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `ready`          | `{ protocolMax }`   | 1     | app booted; the one message allowed targetOrigin `"*"`; loader replies with `init`                                             |
-| `resize`         | `{ height }`        | 1     | from a ResizeObserver on the app root; coalesced to one post per animation frame, skipped when equal to the last posted height |
-| `scroll-request` | `{ top }`           | 1     | app asks the parent page to scroll a point into view                                                                           |
-| `token-request`  | `{}`                | 1     | backstop path: app got a 401 mid-session                                                                                       |
-| `formed`         | `{ companyId }`     | 1     | loader forwards to the partner's `onFormed` — **only the id, nothing else** (see the contract)                                 |
-| `auth-error`     | `{ type, message }` | 1     | loader forwards to `onAuthError`                                                                                               |
-| `load-error`     | `{ type, message }` | 1     | loader forwards to `onLoadError`                                                                                               |
-| `loader-start`   | `{}`                | 1     | first paint inside the frame                                                                                                   |
+| type             | payload                                             | since | notes                                                                                                                          |
+| ---------------- | --------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `ready`          | `{ protocolMax: int ≥ 1 }`                          | 1     | app booted; the one message allowed targetOrigin `"*"`; loader replies with `init`                                             |
+| `resize`         | `{ height: number ≥ 0 }`                            | 1     | from a ResizeObserver on the app root; coalesced to one post per animation frame, skipped when equal to the last posted height |
+| `scroll-request` | `{ top: number }`                                   | 1     | app asks the parent page to scroll a point into view                                                                           |
+| `token-request`  | `{}`                                                | 1     | backstop path: app got a 401 mid-session                                                                                       |
+| `formed`         | `{ companyId: non-empty string }`                   | 1     | loader forwards to the partner's `onFormed` — **only the id, nothing else** (see the contract)                                 |
+| `auth-error`     | `{ type: DoolaAuthError['type'], message: string }` | 1     | loader forwards to `onAuthError`                                                                                               |
+| `load-error`     | `{ type: DoolaLoadError['type'], message: string }` | 1     | loader forwards to `onLoadError`                                                                                               |
+| `loader-start`   | `{}`                                                | 1     | first paint inside the frame                                                                                                   |
 
 ## Messages: mounting peer → app
 
 The mounting peer is the loader — or the portal's branding preview, see below.
 
-| type           | payload                                       | since | notes                                                                                                                                                                                                                                                            |
-| -------------- | --------------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `init`         | `{ session, appearance?, locale?, protocol }` | 1     | first message after `ready`; `appearance` is sent by internal peers only                                                                                                                                                                                         |
-| `token`        | `{ session }`                                 | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                |
-| `update`       | `{ appearance?, locale? }`                    | 1     | runtime `update()` call — see below; `appearance` internal peers only                                                                                                                                                                                            |
-| `token-error`  | `{ reason, message, retryable }`              | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type; `retryable` means the loader will keep renewing on its own — the frame may still send `token-request` in either case, for terminal reasons only after the user has acted outside the frame |
-| `presentation` | `{ mode }`                                    | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                  |
+| type           | payload                                                      | since | notes                                                                                                                                                                                                                                                            |
+| -------------- | ------------------------------------------------------------ | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `init`         | `{ session, appearance?, locale?, protocol, presentation? }` | 1     | first message after `ready`; `appearance` is sent by internal peers only; `presentation` is the frame's mode at handshake time, absent only from a loader older than the field                                                                                   |
+| `token`        | `{ session }`                                                | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                |
+| `update`       | `{ appearance?, locale? }`                                   | 1     | runtime `update()` call — see below; `appearance` internal peers only                                                                                                                                                                                            |
+| `token-error`  | `{ reason, message, retryable }`                             | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type; `retryable` means the loader will keep renewing on its own — the frame may still send `token-request` in either case, for terminal reasons only after the user has acted outside the frame |
+| `presentation` | `{ mode }`                                                   | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                  |
 
 `update` carries the loader's **resolved** state, not the partner's raw call:
 the contract's merge semantics (absent key keeps, key present as `undefined`
 clears) are applied by the loader against the state it holds, and the app
 replaces its values wholesale with what arrives. The app never merges.
+
+**`init` is the complete state snapshot; every other loader→app message is a
+delta.** That is the rule, and it is why nothing is lost when the loader posts
+before the frame can receive: `init` re-reads the session, the locale and the
+presentation mode at handshake time, so a dropped `token` or `presentation` is
+superseded rather than missed. Any future loader→app message carrying state
+rather than an event must therefore also appear on `init`, or a frame that
+mounts after it will never learn that state.
+
+`presentation` on `init` carries the mode the frame is already in, and exists
+because the `presentation` message cannot. The loader decides inline vs. full
+screen when it mounts the iframe, which is before the frame has navigated off
+`about:blank` — a `postMessage` targeted at the SDK origin is dropped by the
+browser at that point, silently, by the same rule this document states above.
+`init` is built in reply to `ready`, so it is the first moment a message is
+guaranteed to arrive. The `presentation` message then covers transitions only.
+An app that ignores the field renders inline until the first transition.
 
 `appearance` on `init` and `update` is a doola-internal channel, not a partner
 option — branding lives in the partner portal, and the public `update()` carries
@@ -110,7 +140,8 @@ living in the partner's page).
    never left waiting.
 4. A `fetchAccessToken` rejection is mapped by the loader from the `status` the
    rejection exposes (the convention lives in the contract, on
-   `FetchAccessToken`):
+   `FetchAccessToken`); a synchronous throw is treated as a rejection with no
+   `status`:
    - `401` → `onAuthError({ type: 'partner_session_expired', message: … })`,
      and the loader stops retrying on its own — automatic renewal ends, but a
      `token-request` from the frame (a user-initiated try-again after logging
