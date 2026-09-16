@@ -74,6 +74,11 @@ describe('parseLoaderMessage payload rules', () => {
       { reason: 'vibes', message: 'x', retryable: true },
     ],
     ['mode is not a resolved mode', 'presentation', { mode: 'auto' }],
+    [
+      'init presentation is not a resolved mode',
+      'init',
+      { session, protocol: 1, presentation: 'fullscreen' },
+    ],
   ])('drops when %s', (_why, type, payload) => {
     expect(parseLoaderMessage({ v: PROTOCOL_VERSION, type, payload })).toBeNull();
   });

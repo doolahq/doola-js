@@ -21,7 +21,10 @@ export const APP_MESSAGES: { [K in AppMessage['type']]: Extract<AppMessage, { ty
 export const LOADER_MESSAGES: {
   [K in LoaderMessage['type']]: Extract<LoaderMessage, { type: K }>;
 } = {
-  init: { type: 'init', payload: { session, protocol: 1, locale: 'en' } },
+  init: {
+    type: 'init',
+    payload: { session, protocol: 1, locale: 'en', presentation: 'fullScreen' },
+  },
   token: { type: 'token', payload: { session } },
   update: { type: 'update', payload: { locale: 'es', appearance: { brand: '#F9C800' } } },
   'token-error': {

@@ -20,8 +20,12 @@ export const PROTOCOL_VERSION = 1;
  * new build always meets an old peer for a few minutes; N−1 is the window that
  * covers. Retiring a version is a one-line change to this constant, which is
  * what makes it reviewable rather than folklore.
+ *
+ * A literal for that reason. Deriving it from PROTOCOL_VERSION would retire the
+ * oldest version as a side effect of bumping the newest — dropping peers still
+ * in the wild with nothing in the diff to review.
  */
-export const MIN_SUPPORTED_VERSION = Math.max(1, PROTOCOL_VERSION - 1);
+export const MIN_SUPPORTED_VERSION = 1;
 
 /**
  * The version both sides speak: `min(mine, theirs)`. A peer older than
@@ -59,11 +63,18 @@ export type PresentationMode = 'inline' | 'fullScreen';
 /**
  * Branding pushed by an internal mounting peer — the partner portal's preview,
  * which mounts the app the way the loader does and sends a fresh `update` for
- * every unsaved draft. The wire format is a flat string map; which keys mean
- * anything is owned by the branding backend, and the app applies only the ones
- * it knows.
+ * every unsaved draft. The wire format is a flat map; which keys mean anything
+ * is owned by the branding backend (docs/protocol.md), and the app applies only
+ * the ones it knows.
+ *
+ * Values are nullable because the backend sends nulls: before PENG-6667 a
+ * partner who never opened the portal got every field as an explicit `null`
+ * rather than absent, and the two sides deploy independently, so a frame
+ * meeting the old shape mid-rollout must still parse. Rejecting one null field
+ * fails the whole `init`, which drops the session and leaves the frame loading
+ * forever.
  */
-export type Appearance = Record<string, string>;
+export type Appearance = Record<string, string | null>;
 
 /** App -> mounting peer (the loader, or the portal's preview). */
 export type AppMessage =

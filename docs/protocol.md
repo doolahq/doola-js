@@ -49,6 +49,12 @@ otherwise reject its peer's traffic immediately after a successful downgrade.
 Before `init` only `ready` exists, and it carries the app's maximum because
 that is the number being negotiated with.
 
+A receiver drops a message whose `v` is above its own maximum, and equally one
+below the oldest version it still supports. Both ends of that window are part of
+the rule: the ceiling stops a peer claiming a version this side cannot read, and
+the floor is how a retired version stops being spoken to rather than being
+half-understood.
+
 ## Origin and source checks — both directions, no exceptions
 
 - The **loader** accepts a message only when both hold:

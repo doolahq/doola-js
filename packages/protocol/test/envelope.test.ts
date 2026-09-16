@@ -40,6 +40,10 @@ describe('projection', () => {
     // toStrictEqual, not toEqual: the latter treats { locale: undefined } as
     // equal to {}, and the structured clone behind postMessage does not.
     expect(Object.keys(sent.payload).sort()).toStrictEqual(['protocol', 'session']);
+
+    // Which is also the init a loader older than `presentation` sends, and a
+    // new app still has to accept it.
+    expect(parseLoaderMessage(sent)).not.toBeNull();
   });
 
   it.each(Object.values(APP_MESSAGES).map((m) => [m.type, m] as const))(
@@ -67,52 +71,5 @@ describe('stamping', () => {
   it('carries the version it was given, not the newest one', () => {
     expect(appEnvelope(APP_MESSAGES.resize, 1).v).toBe(1);
     expect(loaderEnvelope(LOADER_MESSAGES.token, 1).v).toBe(1);
-  });
-});
-
-describe('init carries the presentation mode', () => {
-  it('projects presentation through instead of stripping it', () => {
-    const sent = loaderEnvelope(
-      {
-        type: 'init',
-        payload: {
-          session: { accessToken: 'cs_test_x', expiresIn: 600 },
-          protocol: 1,
-          presentation: 'fullScreen',
-        },
-      },
-      1,
-    );
-
-    // Absent from LOADER_SPEC.init, project() would drop this and every frame
-    // mounted under the breakpoint would start inline without knowing.
-    expect(sent.payload).toMatchObject({ presentation: 'fullScreen' });
-  });
-
-  it('tolerates an init from a loader older than the field', () => {
-    const sent = loaderEnvelope(
-      {
-        type: 'init',
-        payload: { session: { accessToken: 'cs_test_x', expiresIn: 600 }, protocol: 1 },
-      },
-      1,
-    );
-
-    expect(sent.payload).not.toHaveProperty('presentation');
-    expect(parseLoaderMessage(sent)).not.toBeNull();
-  });
-
-  it('rejects a mode outside the union', () => {
-    const sent = {
-      v: 1,
-      type: 'init',
-      payload: {
-        session: { accessToken: 'cs_test_x', expiresIn: 600 },
-        protocol: 1,
-        presentation: 'fullscreen',
-      },
-    };
-
-    expect(parseLoaderMessage(sent)).toBeNull();
   });
 });

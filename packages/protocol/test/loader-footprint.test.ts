@@ -19,12 +19,13 @@ const LOADER_IMPORTS = `
   globalThis.x = [parseAppMessage, loaderEnvelope, negotiate];
 `;
 
-async function bundle(contents: string): Promise<string> {
+async function bundle(contents: string, minify: boolean): Promise<string> {
   const result = await build({
     stdin: { contents, resolveDir: __dirname, loader: 'ts' },
     bundle: true,
     format: 'iife',
     target: 'es2020',
+    minify,
     write: false,
   });
 
@@ -33,16 +34,22 @@ async function bundle(contents: string): Promise<string> {
 
 describe('loader footprint', () => {
   it('stays small enough to be worth sharing', async () => {
-    const code = await bundle(LOADER_IMPORTS);
+    // Minified, because that is the form the loader ships: its own build gained
+    // `--minify` in peng-6218. Measuring unminified counted this package's
+    // comments against a budget that stands in for bytes on the wire, which put
+    // the number at more than twice what a partner actually downloads.
+    const code = await bundle(LOADER_IMPORTS, true);
     const size = gzipSync(code).length;
 
-    // Generous against today's ~1.3 KB: this is a regression alarm, not a
+    // Generous against today's ~925 B: this is a regression alarm, not a
     // target. Raise it in a PR that says what got bigger and why.
-    expect(size, `loader-side bundle is ${size} bytes gzip`).toBeLessThan(1800);
+    expect(size, `loader-side bundle is ${size} bytes gzip`).toBeLessThan(1200);
   });
 
   it('leaves the app-side half behind', async () => {
-    const code = await bundle(LOADER_IMPORTS);
+    // Not minified: this one reads identifiers out of the bundle, and mangled
+    // names would make it pass without checking anything.
+    const code = await bundle(LOADER_IMPORTS, false);
 
     // APP_SPEC is not on this list: the loader parses app messages, so it
     // needs that table. What it must not carry is the app's own send and

@@ -44,6 +44,7 @@ const isFiniteNumber = (x: unknown): boolean => Number.isFinite(x);
 const isPositiveInt = (x: unknown): boolean => Number.isInteger(x) && (x as number) > 0;
 const isNonEmptyString = (x: unknown): boolean => isString(x) && (x as string).length > 0;
 const isNonNegative = (x: unknown): boolean => isFiniteNumber(x) && (x as number) >= 0;
+const isPositiveNumber = (x: unknown): boolean => isFiniteNumber(x) && (x as number) > 0;
 
 /** Absent, or the value passes. Optional means optional, not nullable. */
 const optional =
@@ -85,10 +86,15 @@ const isLoadErrorType = oneOf(LOAD_ERROR_TYPES);
 
 /** Exhaustive over the union for the same reason as AUTH_ERROR and LOAD_ERROR. */
 const PRESENTATION_MODE: Record<PresentationMode, true> = { inline: true, fullScreen: true };
-const isPresentationMode = oneOf(Object.keys(PRESENTATION_MODE) as readonly PresentationMode[]);
+const isPresentationMode = oneOf(Object.keys(PRESENTATION_MODE));
 
+// Structure only: a flat map whose values are a string or null. What the keys
+// mean belongs to the branding backend, not to the wire — see Appearance.
 const isAppearance = (x: unknown): boolean =>
-  typeof x === 'object' && x !== null && !Array.isArray(x) && Object.values(x).every(isString);
+  typeof x === 'object' &&
+  x !== null &&
+  !Array.isArray(x) &&
+  Object.values(x).every((value) => value === null || isString(value));
 
 /**
  * Structure only — a token and a lifetime that is a number. Whether a session
@@ -101,7 +107,11 @@ const isAppearance = (x: unknown): boolean =>
  */
 const SESSION_FIELDS: FieldsOf<CustomerSession> = {
   accessToken: { accepts: isNonEmptyString },
-  expiresIn: { accepts: isFiniteNumber },
+  // Positive, matching the loader's parseSession and the app's isSession. A
+  // zero or negative lifetime is not a session either side can act on, and the
+  // loader's renewal arithmetic turns one into a timer that reschedules on
+  // every tick — so the wire refuses it rather than leaving each peer to.
+  expiresIn: { accepts: isPositiveNumber },
   expiresAt: { accepts: optional(isString) },
 };
 
@@ -140,16 +150,10 @@ export const LOADER_SPEC: SpecOf<LoaderMessage> = {
     protocol: { accepts: isPositiveInt },
     locale: { accepts: optional(isString) },
     appearance: { accepts: optional(isAppearance) },
-    // `init` is the complete state snapshot (docs/protocol.md), and the mode
-    // has to ride on it: the loader decides inline vs. full screen when it
-    // mounts the iframe, which is before the frame has left about:blank, so a
-    // `presentation` message at that point is dropped by the browser. Absent
-    // from this table, `project()` would strip the field back out.
-    //
-    // Optional on the wire even though the loader always sends it. The two
+    // Optional on the wire even though the loader always sends it: the two
     // sides are cached and deployed independently, so a loader older than this
-    // field will keep sending `init` without it, and requiring it here would
-    // make a new app reject that whole handshake.
+    // field keeps sending `init` without it. Why it rides on `init` at all is
+    // docs/protocol.md.
     presentation: { accepts: optional(isPresentationMode) },
   },
   token: { session },

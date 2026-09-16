@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { PROTOCOL_VERSION } from '../src/messages';
+import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION } from '../src/messages';
 import { APP_SPEC, LOADER_SPEC } from '../src/spec';
 
 /**
@@ -33,6 +33,14 @@ describe('docs/protocol.md', () => {
 
     expect(declared, 'no "**Protocol version: N**" found').not.toBeNull();
     expect(Number(declared?.[1])).toBe(PROTOCOL_VERSION);
+  });
+
+  it('keeps the supported window at N-1 or narrower', () => {
+    // MIN_SUPPORTED_VERSION is a literal so retiring a version is deliberate.
+    // This is the other half: it must never silently widen past what the doc
+    // promises either.
+    expect(MIN_SUPPORTED_VERSION).toBeLessThanOrEqual(PROTOCOL_VERSION);
+    expect(MIN_SUPPORTED_VERSION).toBeGreaterThanOrEqual(PROTOCOL_VERSION - 1);
   });
 
   it('documents exactly the app messages the spec accepts', () => {

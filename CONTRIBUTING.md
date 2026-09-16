@@ -36,9 +36,11 @@ This section is the canonical definition; everything else in the repo points her
 - **Internal but versioned:** `docs/protocol.md`, implemented by
   `packages/protocol` (`@doola/sdk-protocol`). Partners never touch either, but
   the loader and the embedded app deploy independently, so it carries its own
-  version and both sides support N−1. The package is published for one reason:
-  the app lives in `doolahq/doola-sdk-app`, and a wire format maintained in two
-  repositories drifts. `docs/protocol.md` states which of the two wins.
+  version and both sides support N−1. The package is published because the app
+  lives in `doolahq/doola-sdk-app`, and a wire format maintained in two
+  repositories drifts. **Where the document and the package disagree, the
+  document wins and the package has the bug** — `spec-matches-docs.test.ts`
+  exists to notice.
 
 ## Conventions
 
