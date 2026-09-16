@@ -4,6 +4,7 @@ import {
   type CustomerSession,
   type LoadErrorType,
   type LoaderMessage,
+  type PresentationMode,
 } from './messages';
 
 export type Payload = Record<string, unknown>;
@@ -82,6 +83,10 @@ export const LOAD_ERROR_TYPES = Object.keys(LOAD_ERROR) as readonly LoadErrorTyp
 const isAuthErrorType = oneOf(AUTH_ERROR_TYPES);
 const isLoadErrorType = oneOf(LOAD_ERROR_TYPES);
 
+/** Exhaustive over the union for the same reason as AUTH_ERROR and LOAD_ERROR. */
+const PRESENTATION_MODE: Record<PresentationMode, true> = { inline: true, fullScreen: true };
+const isPresentationMode = oneOf(Object.keys(PRESENTATION_MODE) as readonly PresentationMode[]);
+
 const isAppearance = (x: unknown): boolean =>
   typeof x === 'object' && x !== null && !Array.isArray(x) && Object.values(x).every(isString);
 
@@ -135,6 +140,17 @@ export const LOADER_SPEC: SpecOf<LoaderMessage> = {
     protocol: { accepts: isPositiveInt },
     locale: { accepts: optional(isString) },
     appearance: { accepts: optional(isAppearance) },
+    // `init` is the complete state snapshot (docs/protocol.md), and the mode
+    // has to ride on it: the loader decides inline vs. full screen when it
+    // mounts the iframe, which is before the frame has left about:blank, so a
+    // `presentation` message at that point is dropped by the browser. Absent
+    // from this table, `project()` would strip the field back out.
+    //
+    // Optional on the wire even though the loader always sends it. The two
+    // sides are cached and deployed independently, so a loader older than this
+    // field will keep sending `init` without it, and requiring it here would
+    // make a new app reject that whole handshake.
+    presentation: { accepts: optional(isPresentationMode) },
   },
   token: { session },
   update: {
@@ -146,7 +162,7 @@ export const LOADER_SPEC: SpecOf<LoaderMessage> = {
     message: { accepts: isString },
     retryable: { accepts: isBoolean },
   },
-  presentation: { mode: { accepts: oneOf(['inline', 'fullScreen']) } },
+  presentation: { mode: { accepts: isPresentationMode } },
 };
 
 export type Spec = Record<string, Record<string, Field>>;

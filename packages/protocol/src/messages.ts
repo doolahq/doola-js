@@ -85,6 +85,7 @@ export type LoaderMessage =
         protocol: number;
         locale?: string | undefined;
         appearance?: Appearance | undefined;
+        presentation?: PresentationMode | undefined;
       };
     }
   | { type: 'token'; payload: { session: CustomerSession } }
