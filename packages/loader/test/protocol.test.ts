@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { envelope, parseAppMessage, PROTOCOL_VERSION, tokenError } from '../src/protocol';
+import {
+  envelope,
+  negotiate,
+  parseAppMessage,
+  PROTOCOL_VERSION,
+  tokenError,
+} from '../src/protocol';
 
 describe('parseAppMessage', () => {
   it('accepts a well-formed message at the current version', () => {
@@ -66,12 +72,23 @@ describe('parseAppMessage', () => {
     expect(retryable('renewal_failed')).toBe(true);
   });
 
-  it('stamps outbound messages with the current version', () => {
-    expect(
-      envelope({
-        type: 'token',
-        payload: { session: { accessToken: 'cs_test_x', expiresIn: 600 } },
-      }).v,
-    ).toBe(PROTOCOL_VERSION);
+  it("stamps outbound messages with the version it is given, not this side's maximum", () => {
+    const token = {
+      type: 'token',
+      payload: { session: { accessToken: 'cs_test_x', expiresIn: 600 } },
+    } as const;
+
+    expect(envelope(token, PROTOCOL_VERSION).v).toBe(PROTOCOL_VERSION);
+
+    // The case that matters once PROTOCOL_VERSION moves past an app's maximum:
+    // after negotiating down, everything after init is spoken in the agreed
+    // version, so an app applying parseAppMessage's own rule still accepts it.
+    const agreed = negotiate(1);
+    expect(envelope(token, agreed).v).toBe(agreed);
+  });
+
+  it('negotiates down to the lower of the two maximums', () => {
+    expect(negotiate(PROTOCOL_VERSION + 1)).toBe(PROTOCOL_VERSION);
+    expect(negotiate(1)).toBe(1);
   });
 });

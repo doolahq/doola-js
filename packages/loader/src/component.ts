@@ -1,6 +1,13 @@
 import type { DoolaOptions } from '@doola/js';
 
-import { envelope, negotiate, parseAppMessage, type LoaderMessage } from './protocol';
+import {
+  PROTOCOL_VERSION,
+  envelope,
+  negotiate,
+  parseAppMessage,
+  type LoaderMessage,
+  type PresentationMode,
+} from './protocol';
 import type { SessionManager } from './session';
 
 const INLINE_FRAME_CSS = 'width:100%;border:0;display:block;height:0;';
@@ -101,6 +108,19 @@ export class FrameController {
   private restoreStyles: (() => void) | null = null;
   private readonly onMediaChange = () => this.applyPresentation();
 
+  /**
+   * Settled by `ready` and used for every outbound `v` after it. The loader's
+   * own maximum until then, which only ever stamps messages no loaded frame
+   * can receive yet.
+   */
+  private protocol = PROTOCOL_VERSION;
+
+  /** True once `ready` has arrived, which is the first proof the frame is on the SDK origin. */
+  private appReady = false;
+
+  /** The last height the app asked for, so full screen can hand it back. */
+  private inlineHeight: string | null = null;
+
   constructor(
     private readonly host: DoolaElement,
     private readonly config: FrameConfig,
@@ -135,6 +155,14 @@ export class FrameController {
 
     this.iframe?.remove();
     this.iframe = null;
+
+    // Everything below is a property of the frame that just died. A remount
+    // builds a new iframe that navigates and handshakes again, so carrying
+    // `appReady` over would post to about:blank exactly as a first mount does.
+    this.appReady = false;
+    this.protocol = PROTOCOL_VERSION;
+    this.inlineHeight = null;
+
     this.config.onDisconnect(this);
   }
 
@@ -151,7 +179,26 @@ export class FrameController {
 
   post(message: LoaderMessage): void {
     // Target origin is always the SDK origin, never '*' — see docs/protocol.md.
-    this.iframe?.contentWindow?.postMessage(envelope(message), this.config.sdkOrigin);
+    this.iframe?.contentWindow?.postMessage(
+      envelope(message, this.protocol),
+      this.config.sdkOrigin,
+    );
+  }
+
+  /** Whether this frame is inline or covering the viewport, right now. */
+  private get presentationMode(): PresentationMode {
+    return this.restoreStyles ? 'fullScreen' : 'inline';
+  }
+
+  /**
+   * Only `ready` proves the frame has navigated to the SDK origin. Before it,
+   * `contentWindow` exists but the document is still about:blank, so a post
+   * targeted at the SDK origin is dropped by the browser without error —
+   * which is why the mode also rides on `init` rather than only on this.
+   */
+  private announcePresentation(): void {
+    if (this.appReady)
+      this.post({ type: 'presentation', payload: { mode: this.presentationMode } });
   }
 
   handleMessage(event: MessageEvent): void {
@@ -165,6 +212,11 @@ export class FrameController {
 
     switch (message.type) {
       case 'ready':
+        // Set before the first post: every outbound message from here on is
+        // stamped with the version this assignment settles.
+        this.protocol = negotiate(message.payload.protocolMax);
+        this.appReady = true;
+
         // Rejection swallowed: the partner hears via onAuthError and this
         // frame via token-error (both from the manager's failure callback).
         void this.config.sessions
@@ -174,7 +226,8 @@ export class FrameController {
               type: 'init',
               payload: {
                 session,
-                protocol: negotiate(message.payload.protocolMax),
+                protocol: this.protocol,
+                presentation: this.presentationMode,
                 locale: this.config.state.locale,
               },
             }),
@@ -182,8 +235,11 @@ export class FrameController {
           .catch(() => {});
         break;
       case 'resize':
-        if (this.iframe && !this.restoreStyles)
-          this.iframe.style.height = `${message.payload.height}px`;
+        // Recorded even while full screen, where it is not applied: returning
+        // to inline reassigns cssText wholesale and would otherwise land back
+        // on INLINE_FRAME_CSS's height:0 with no resize to replay.
+        this.inlineHeight = `${message.payload.height}px`;
+        if (this.iframe && !this.restoreStyles) this.iframe.style.height = this.inlineHeight;
         break;
       case 'scroll-request': {
         const top = this.iframe
@@ -227,13 +283,14 @@ export class FrameController {
 
       this.restoreStyles = () => {
         iframe.style.cssText = INLINE_FRAME_CSS;
+        if (this.inlineHeight) iframe.style.height = this.inlineHeight;
         unlockPageScroll();
         this.restoreStyles = null;
       };
-      this.post({ type: 'presentation', payload: { mode: 'fullScreen' } });
+      this.announcePresentation();
     } else if (!wantFullScreen && this.restoreStyles) {
       this.restoreStyles();
-      this.post({ type: 'presentation', payload: { mode: 'inline' } });
+      this.announcePresentation();
     }
   }
 }

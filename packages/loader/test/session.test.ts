@@ -83,15 +83,30 @@ describe('SessionManager', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('never schedules a zero-delay renewal loop for an already-expired expiresIn', async () => {
-    const fetch = vi.fn().mockResolvedValue(session(0));
-    const manager = new SessionManager(fetch, vi.fn(), vi.fn());
+  it.each([
+    ['already expired', 0],
+    ['negative', -10],
+    ['undefined', undefined],
+    ['a non-numeric string', 'abc'],
+    ['null', null],
+  ])(
+    'rejects the mint when expiresIn is %s, instead of renewing on a timer',
+    async (_label, value) => {
+      const fetch = vi.fn().mockResolvedValue({ accessToken: 'cs_test_token', expiresIn: value });
+      const onAuthError = vi.fn();
+      const manager = new SessionManager(fetch, onAuthError, vi.fn());
 
-    manager.resume();
-    await vi.advanceTimersByTimeAsync(4_999);
+      await expect(manager.current()).rejects.toThrow(/expiresIn/);
 
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
+      manager.resume();
+      await vi.advanceTimersByTimeAsync(300);
+
+      // The floor cannot hold for a NaN delay — Math.max propagates NaN — so
+      // before this was validated, the non-numeric rows renewed on every tick.
+      expect(fetch.mock.calls.length).toBeLessThanOrEqual(2);
+      expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type: 'mint_failed' }));
+    },
+  );
 
   it('maps a 401 rejection to partner_session_expired', async () => {
     const onAuthError = vi.fn();

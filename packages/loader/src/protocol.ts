@@ -12,6 +12,9 @@ export function negotiate(protocolMax: number): number {
   return Math.min(PROTOCOL_VERSION, protocolMax);
 }
 
+/** How a frame is currently presented. Carried by `init` and by `presentation`. */
+export type PresentationMode = 'inline' | 'fullScreen';
+
 export type AppMessage =
   | { type: 'ready'; payload: { protocolMax: number } }
   | { type: 'resize'; payload: { height: number } }
@@ -25,7 +28,12 @@ export type AppMessage =
 export type LoaderMessage =
   | {
       type: 'init';
-      payload: { session: CustomerSession; locale?: string | undefined; protocol: number };
+      payload: {
+        session: CustomerSession;
+        locale?: string | undefined;
+        protocol: number;
+        presentation: PresentationMode;
+      };
     }
   | { type: 'token'; payload: { session: CustomerSession } }
   | { type: 'update'; payload: { locale?: string | undefined } }
@@ -33,7 +41,7 @@ export type LoaderMessage =
       type: 'token-error';
       payload: { reason: DoolaAuthError['type']; message: string; retryable: boolean };
     }
-  | { type: 'presentation'; payload: { mode: 'inline' | 'fullScreen' } };
+  | { type: 'presentation'; payload: { mode: PresentationMode } };
 
 export type Envelope = LoaderMessage & { v: number };
 
@@ -112,6 +120,14 @@ export function tokenError(error: DoolaAuthError): Extract<LoaderMessage, { type
   };
 }
 
-export function envelope(message: LoaderMessage): Envelope {
-  return { v: PROTOCOL_VERSION, ...message };
+/**
+ * `v` is the version the message is spoken in, which is the negotiated one —
+ * the same reading `parseAppMessage` applies inbound when it drops anything
+ * above this side's maximum. Stamping the sender's maximum instead would mean
+ * that the first time the loader ships v2 to an app still on v1, it would
+ * answer `ready` with "we speak 1" and then stamp 2 on everything after,
+ * which an app mirroring that inbound rule drops.
+ */
+export function envelope(message: LoaderMessage, version: number): Envelope {
+  return { v: version, ...message };
 }

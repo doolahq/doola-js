@@ -9,6 +9,7 @@ import {
   type InstanceState,
 } from './component';
 import { envFromPublishableKey } from './env';
+import { presentationModeFrom, serializedOrigin } from './options';
 import { tokenError, type LoaderMessage } from './protocol';
 import { SessionManager } from './session';
 
@@ -49,7 +50,7 @@ function init(options: DoolaOptions): Doola {
   // whose `origin` overrides only where the app is served from — so the
   // env lookup must run (and validate the key) before the override.
   const env = envFromPublishableKey(publishableKey);
-  const sdkOrigin = options.origin ?? env.sdkOrigin;
+  const sdkOrigin = options.origin === undefined ? env.sdkOrigin : serializedOrigin(options.origin);
 
   const state: InstanceState = { locale: options.locale };
   // Snapshot: the contract fixes options at init, so later mutation of the
@@ -60,7 +61,7 @@ function init(options: DoolaOptions): Doola {
     onLoaderStart: options.onLoaderStart,
     onLoadError: options.onLoadError,
   };
-  const presentationMode = options.presentation?.mode ?? 'auto';
+  const presentationMode = presentationModeFrom(options.presentation);
   const fullScreenQuery =
     presentationMode === 'auto'
       ? window.matchMedia(`(max-width: ${FULLSCREEN_BREAKPOINT_PX}px)`)

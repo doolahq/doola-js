@@ -133,6 +133,18 @@ export class SessionManager {
       const session = await this.fetchAccessToken();
       if (this.stopped) return session;
 
+      // Checked rather than trusted, because `expiresIn` feeds every deadline
+      // below and the failure is not an error. A non-numeric one — `expires_in`
+      // through a snake_case serializer is the likely way in — makes ttlMs NaN,
+      // and Math.max propagates NaN instead of applying MIN_RENEWAL_DELAY_MS,
+      // so setTimeout(NaN) reschedules on the next tick: a request storm
+      // against the partner's own token route rather than anything they see.
+      if (!Number.isFinite(session.expiresIn) || session.expiresIn <= 0) {
+        throw new Error(
+          `doola: fetchAccessToken resolved with expiresIn ${JSON.stringify(session.expiresIn)}; expected a positive number of seconds.`,
+        );
+      }
+
       const now = Date.now();
       const ttlMs = session.expiresIn * 1_000;
       const active: ActiveSession = {

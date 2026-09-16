@@ -36,6 +36,14 @@ up front, in the `ready`/`init` handshake: `ready` carries the app's
 `protocolMax`, `init` replies with the `protocol` both sides then speak —
 `min(loaderMax, appMax)`. There is no other downgrade mechanism.
 
+`v` is therefore the version a message is **spoken in**, not the sender's
+maximum: once `init` has settled it, every later message from either side
+carries the negotiated value. This is what makes the receive rule coherent —
+each side drops anything whose `v` is above its own maximum, which would
+otherwise reject its peer's traffic immediately after a successful downgrade.
+Before `init` only `ready` exists, and it carries the app's maximum because
+that is the number being negotiated with.
+
 ## Origin and source checks — both directions, no exceptions
 
 - The **loader** accepts a message only when both hold:
@@ -74,18 +82,27 @@ up front, in the `ready`/`init` handshake: `ready` carries the app's
 
 The mounting peer is the loader — or the portal's branding preview, see below.
 
-| type           | payload                                       | since | notes                                                                                                                                                                                                                                                            |
-| -------------- | --------------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `init`         | `{ session, appearance?, locale?, protocol }` | 1     | first message after `ready`; `appearance` is sent by internal peers only                                                                                                                                                                                         |
-| `token`        | `{ session }`                                 | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                |
-| `update`       | `{ appearance?, locale? }`                    | 1     | runtime `update()` call — see below; `appearance` internal peers only                                                                                                                                                                                            |
-| `token-error`  | `{ reason, message, retryable }`              | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type; `retryable` means the loader will keep renewing on its own — the frame may still send `token-request` in either case, for terminal reasons only after the user has acted outside the frame |
-| `presentation` | `{ mode }`                                    | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                  |
+| type           | payload                                                     | since | notes                                                                                                                                                                                                                                                            |
+| -------------- | ----------------------------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `init`         | `{ session, appearance?, locale?, protocol, presentation }` | 1     | first message after `ready`; `appearance` is sent by internal peers only; `presentation` is the frame's mode at handshake time — see below                                                                                                                       |
+| `token`        | `{ session }`                                               | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                |
+| `update`       | `{ appearance?, locale? }`                                  | 1     | runtime `update()` call — see below; `appearance` internal peers only                                                                                                                                                                                            |
+| `token-error`  | `{ reason, message, retryable }`                            | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type; `retryable` means the loader will keep renewing on its own — the frame may still send `token-request` in either case, for terminal reasons only after the user has acted outside the frame |
+| `presentation` | `{ mode }`                                                  | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                  |
 
 `update` carries the loader's **resolved** state, not the partner's raw call:
 the contract's merge semantics (absent key keeps, key present as `undefined`
 clears) are applied by the loader against the state it holds, and the app
 replaces its values wholesale with what arrives. The app never merges.
+
+`presentation` on `init` carries the mode the frame is already in, and exists
+because the `presentation` message cannot. The loader decides inline vs. full
+screen when it mounts the iframe, which is before the frame has navigated off
+`about:blank` — a `postMessage` targeted at the SDK origin is dropped by the
+browser at that point, silently, by the same rule this document states above.
+`init` is built in reply to `ready`, so it is the first moment a message is
+guaranteed to arrive. The `presentation` message then covers transitions only.
+An app that ignores the field renders inline until the first transition.
 
 `appearance` on `init` and `update` is a doola-internal channel, not a partner
 option — branding lives in the partner portal, and the public `update()` carries
