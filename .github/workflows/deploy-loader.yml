@@ -1,0 +1,142 @@
+name: Deploy loader
+
+# `@doola/loader` is never published to npm. It is the IIFE the shim injects
+# from js.doola.com, and it is deployed rather than installed — which is what
+# lets a loader fix reach every partner without anyone upgrading a dependency
+# (CONTRIBUTING.md, "The loader outlives every published contract version").
+#
+# One object at one permanent path, `/v1/doola.js`: `v1` is the public contract
+# version, not a build id, so the URL never carries a content hash and the file
+# it names is mutable. That is what makes the invalidation below load-bearing.
+on:
+  # Same inversion as doola-sdk-app: nothing is launched, so main deploys
+  # development and production is dispatch-only, behind that environment's
+  # required reviewer.
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: environment
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+# One deploy per environment, never cancelled: a cancelled run can leave the
+# object replaced and the CDN not invalidated, which is the one state where the
+# edge serves the old loader indefinitely.
+concurrency:
+  group: deploy-loader-${{ inputs.environment || 'development' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Required, not decoration: the IAM trust policy matches on
+    # `repo:doolahq/doola-js:environment:<name>`, a subject GitHub only mints
+    # for a job that declares `environment:` at job level. Without this line
+    # every assume-role is denied.
+    environment: ${{ inputs.environment || 'development' }}
+    env:
+      # Set on the GitHub Environment of the same name, along with
+      # `AWS_DEPLOY_ROLE_ARN` below — see docs/releasing.md.
+      BUCKET: ${{ vars.LOADER_BUCKET }}
+      DISTRIBUTION_ID: ${{ vars.LOADER_DISTRIBUTION_ID }}
+      HOSTNAME: ${{ vars.LOADER_HOSTNAME }}
+      KEY: v1/doola.js
+      BUNDLE: packages/loader/dist/index.global.js
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      # The same set CI runs, minus formatting. This is not gated on CI — the
+      # two race on the same commit and `main` requires no status check — and a
+      # dispatch can target any ref, so this is the last gate before a bundle
+      # reaches a partner's critical path.
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: node scripts/check-budgets.mjs
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: loader-deploy
+          # Signing region only. S3 redirects a request for a bucket that lives
+          # elsewhere and the CLI retries.
+          aws-region: eu-central-1
+
+      # Most pushes to main do not change these bytes — the `version packages`
+      # merge this repo's own release flow generates touches only manifests and
+      # changelogs — and a no-op deploy still costs an invalidation and the wait
+      # for it. Comparing first is what keeps that wait affordable enough to be
+      # worth doing properly below.
+      #
+      # A skip, so it is safe to be wrong: the ETag is the md5 only for a
+      # single-part, SSE-S3 object, and anything that stops being true here
+      # simply never matches and deploys anyway.
+      - name: Skip if the edge already has this bundle
+        id: compare
+        run: |
+          REMOTE=$(aws s3api head-object --bucket "$BUCKET" --key "$KEY" --query ETag --output text 2>/dev/null || true)
+          LOCAL=$(md5sum "$BUNDLE" | cut -d' ' -f1)
+
+          if [ "$(printf '%s' "$REMOTE" | tr -d '"')" = "$LOCAL" ]; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo "\`$KEY\` is already the bundle this commit builds." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      # Explicitly not immutable: `/v1/doola.js` is a permanent URL serving
+      # mutable content, so a browser that caches it for a year runs last
+      # year's loader on a partner's page. The content type is set rather than
+      # inferred, because a script served as the wrong type is refused by any
+      # partner sending `X-Content-Type-Options: nosniff`.
+      - name: Publish the loader
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          aws s3 cp "$BUNDLE" "s3://$BUCKET/$KEY" \
+            --cache-control 'public, max-age=300, must-revalidate' \
+            --content-type 'text/javascript; charset=utf-8' \
+            --no-progress
+
+      # Waited on rather than fired and forgotten, because until it completes
+      # the edge is still serving the previous loader, and a deploy that reports
+      # success while partners run the old bundle is the failure this job exists
+      # to avoid.
+      - name: Invalidate the edge
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          ID=$(aws cloudfront create-invalidation \
+            --distribution-id "$DISTRIBUTION_ID" \
+            --paths "/$KEY" \
+            --query 'Invalidation.Id' --output text)
+
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "$DISTRIBUTION_ID" --id "$ID"
+
+      # Against the public URL, not the bucket: S3 already refuses a corrupted
+      # PUT, so re-checking the origin proves nothing the previous step did not.
+      # What is worth proving is the whole path — that DNS resolves, that the
+      # distribution maps this key to that URL, and that the invalidation
+      # actually cleared what the edge hands a partner.
+      #
+      # It is also what gives the development deploy a job: nothing loads
+      # js.test.doola.com on its own, since `@doola/js` hardcodes the production
+      # URL, so without this a dev run proves only that S3 accepted a PUT.
+      - name: Verify what the edge now serves
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          SERVED=$(curl -fsS "https://$HOSTNAME/$KEY" | sha256sum | cut -d' ' -f1)
+          LOCAL=$(sha256sum "$BUNDLE" | cut -d' ' -f1)
+
+          if [ "$SERVED" != "$LOCAL" ]; then
+            echo "::error::https://$HOSTNAME/$KEY is serving $SERVED, this commit built $LOCAL."
+            exit 1
+          fi
+
+          echo "\`https://$HOSTNAME/$KEY\` serving sha256 \`$LOCAL\`" >> "$GITHUB_STEP_SUMMARY"

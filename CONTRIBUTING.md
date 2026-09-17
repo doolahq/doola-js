@@ -49,7 +49,9 @@ This section is the canonical definition; everything else in the repo points her
 
 - Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:` …).
 - Versioning via [changesets](https://github.com/changesets/changesets): every
-  user-facing change includes one (`pnpm changeset`).
+  user-facing change includes one (`pnpm changeset`). How a changeset becomes a
+  published version, and how the loader bundle reaches js.doola.com, is
+  [`docs/releasing.md`](docs/releasing.md).
 - `pnpm typecheck` and `pnpm format:check` must pass; CI enforces both.
 - Node and pnpm versions are pinned in `package.json` (`engines` / `packageManager`) and `.nvmrc` — those are the source of truth, not this file.
 
