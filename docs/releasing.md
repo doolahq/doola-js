@@ -92,6 +92,36 @@ purpose is to be absent. A wrong bucket or distribution needs no assertion in
 the workflow for the same reason: the role is scoped to one of each, so a wrong
 value is a loud `AccessDenied`.
 
+## Going live
+
+`js.doola.com` has no not-ready gate, unlike `sdk.doola.com`. Both answer 403
+today, but for reasons that behave differently: the app's comes from the
+`<env>-partner-sdk-shell-not-ready` CloudFront function and survives a deploy,
+while the loader's comes from an empty bucket and disappears the moment one
+runs. A production loader deploy is therefore the live switch, with that
+environment's required reviewer as the only thing in front of it.
+
+That is a decision rather than an oversight. The loader is inert alone — it
+injects an iframe against the SDK origin, which is still gated — so a blanket
+403 in front of it protects nothing, and it would break the edge verification
+that is the only proof a deploy actually reached anyone.
+
+What it does mean is that the launch order matters, because `@doola/js`
+hardcodes `https://js.doola.com/v1/doola.js`:
+
+1. Deploy the embedded app to production (doola-sdk-app). Still dark behind the
+   not-ready function.
+2. Deploy the loader to production, from here. `js.doola.com` goes live and
+   nothing points at it yet.
+3. Drop the not-ready function association on the app distribution, in
+   doolahq/infrastructure. The frame now renders.
+4. Publish `@doola/js`. Last, because it is the only irreversible step — a
+   version number, once used, can never be reused — and by then every URL it
+   depends on is already serving.
+
+Publishing before step 2 hands the first partner who installs a 403 for the
+loader; before step 3, a frame that never renders.
+
 ### Cache behaviour
 
 `/v1/doola.js` is published with `max-age=300, must-revalidate` and the deploy
