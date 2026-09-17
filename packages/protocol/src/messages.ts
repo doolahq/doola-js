@@ -16,10 +16,11 @@
 export const PROTOCOL_VERSION = 1;
 
 /**
- * The oldest version still accepted. The two sides deploy independently, so a
- * new build always meets an old peer for a few minutes; N−1 is the window that
- * covers. Retiring a version is a one-line change to this constant, which is
- * what makes it reviewable rather than folklore.
+ * The oldest version still accepted, making the supported window the closed
+ * range `[MIN_SUPPORTED_VERSION, PROTOCOL_VERSION]` — the two sides deploy
+ * independently, so a new build always meets an old peer for a few minutes.
+ * Retiring a version is a one-line change to this constant, which is what
+ * makes it reviewable rather than folklore.
  *
  * A literal for that reason. Deriving it from PROTOCOL_VERSION would retire the
  * oldest version as a side effect of bumping the newest — dropping peers still
@@ -67,17 +68,18 @@ export type PresentationMode = 'inline' | 'fullScreen';
  * is owned by the branding backend (docs/protocol.md), and the app applies only
  * the ones it knows.
  *
- * Values are deliberately wide. `acceptsAll` fails the whole payload when one
- * field fails, so a value type this does not list does not lose that key — it
- * drops the `init` or `update` entirely, and the frame keeps whatever it had.
- * Two shapes the backend already sends prove the point: `attribution` is a
- * boolean, and before PENG-6667 a partner who never opened the portal got
- * every field as an explicit `null` rather than absent. Both must parse.
+ * Values are `unknown` on purpose. `acceptsAll` fails the whole payload when
+ * one field fails, so any value type the wire failed to anticipate costs a
+ * partner the entire `init` or `update` — not the one key — and the frame keeps
+ * whatever it had, or never starts. The table already carries three shapes that
+ * would each have to be guessed: strings, an explicit `null` for a partner who
+ * never opened the portal, and `attribution`, which is a boolean.
  *
- * What a key *means* is the branding backend's (docs/protocol.md); the wire
- * checks that the thing is a flat map of primitives and stops there.
+ * So the wire checks that this is a map and stops. The app is what knows the
+ * keys: `setBranding` walks its own table and applies the ones it recognises,
+ * which makes an unrecognised value inert rather than fatal.
  */
-export type Appearance = Record<string, string | number | boolean | null>;
+export type Appearance = Record<string, unknown>;
 
 /**
  * Forwarded verbatim to the partner's `onAuthError` / `onLoadError`, so these

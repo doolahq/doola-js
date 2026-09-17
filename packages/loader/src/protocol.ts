@@ -8,9 +8,9 @@ import type { CustomerSession, DoolaAuthError, DoolaLoadError } from '@doola/js'
 export const PROTOCOL_VERSION = 1;
 
 /**
- * The oldest version still accepted. Both sides deploy independently, so a new
- * build always meets an old peer for a few minutes; N−1 is the window that
- * covers, and docs/protocol.md states the floor as part of the receive rule.
+ * The oldest version still accepted, making the supported window the closed
+ * range `[MIN_SUPPORTED_VERSION, PROTOCOL_VERSION]` — docs/protocol.md states
+ * the floor with the ceiling.
  */
 export const MIN_SUPPORTED_VERSION = 1;
 
@@ -117,15 +117,17 @@ export function parseAppMessage(data: unknown): AppMessage | null {
   if (typeof v !== 'number' || !Number.isInteger(v)) return null;
   if (v > PROTOCOL_VERSION || v < MIN_SUPPORTED_VERSION) return null;
 
+  if (typeof type !== 'string') return null;
+
   // Arrays are objects, so `payload: []` reached a shape check that reads no
   // keys and passed — `token-request` and `loader-start` took an array.
-  if (typeof type !== 'string' || typeof payload !== 'object' || payload === null) return null;
-  if (Array.isArray(payload)) return null;
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;
 
-  // An own-property check, not a bare index: every Object.prototype member
-  // resolved to something truthy here, so `type: 'toString'` parsed as a valid
-  // message and `type: '__proto__'` threw rather than returning null, against
-  // the never-throw rule in docs/protocol.md.
+  // Own property, not a bare index: every Object.prototype member resolved to
+  // something truthy here, so `type: 'toString'` parsed as a valid message and
+  // `type: '__proto__'` threw rather than returning null, against the
+  // never-throw rule in docs/protocol.md. `hasOwnProperty.call`, not
+  // `Object.hasOwn`: tsc's lib for target ES2020 does not declare it.
   if (!Object.prototype.hasOwnProperty.call(PAYLOAD_SHAPE, type)) return null;
 
   const hasShape = (PAYLOAD_SHAPE as Record<string, ShapeCheck>)[type];

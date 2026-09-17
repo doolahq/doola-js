@@ -16,7 +16,10 @@ The contract between the loader (partner's page, doola code) and the embedded ap
 (the SDK origin, inside the iframe). Internal to doola — partners never touch this —
 but versioned like a public API because **the two sides deploy independently**:
 on every deploy, new-loader-with-old-app and old-loader-with-new-app both exist
-in the wild for minutes. Both sides MUST support protocol version N−1.
+in the wild for minutes. Both sides MUST accept the closed window
+`[MIN_SUPPORTED_VERSION, PROTOCOL_VERSION]`, which is what "support N−1" means
+once there is an N−1 to support — at version 1 the window is `[1, 1]`, because
+0 is not a version. A receiver drops anything outside it, at either end.
 
 N−1 covers only this pair, which deploys minutes apart. The shim ↔ loader pair
 lives under a much stricter rule — every published shim version, for as long as

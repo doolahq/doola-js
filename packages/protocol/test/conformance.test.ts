@@ -39,12 +39,12 @@ const loadPayloadMatches: Exact<LoadErrorPayload, DoolaLoadError> = true;
 
 describe('wire vocabulary', () => {
   it('agrees with the public contract', () => {
-    expect(
-      authErrorMatches &&
-        loadErrorMatches &&
-        sessionMatches &&
-        authPayloadMatches &&
-        loadPayloadMatches,
-    ).toBe(true);
+    expect([
+      authErrorMatches,
+      loadErrorMatches,
+      sessionMatches,
+      authPayloadMatches,
+      loadPayloadMatches,
+    ]).not.toContain(false);
   });
 });

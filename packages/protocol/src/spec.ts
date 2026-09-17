@@ -88,14 +88,12 @@ const isLoadErrorType = oneOf(LOAD_ERROR_TYPES);
 const PRESENTATION_MODE: Record<PresentationMode, true> = { inline: true, fullScreen: true };
 const isPresentationMode = oneOf(Object.keys(PRESENTATION_MODE));
 
-// Structure only: a flat map of primitives. Which keys mean anything, and what
-// type each one is, belongs to the branding backend rather than the wire — see
-// Appearance for why a narrow check here drops whole messages.
-const isPrimitive = (x: unknown): boolean =>
-  x === null || typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean';
-
+// Structure only, and structure means "a map" — not what is in it. `acceptsAll`
+// fails the whole payload when one field fails, so every value type this does
+// not anticipate costs a partner the entire message rather than the one key,
+// and the wire does not own that table: see Appearance.
 const isAppearance = (x: unknown): boolean =>
-  typeof x === 'object' && x !== null && !Array.isArray(x) && Object.values(x).every(isPrimitive);
+  typeof x === 'object' && x !== null && !Array.isArray(x);
 
 /**
  * Structure only — a token and a lifetime that is a number. Whether a session
