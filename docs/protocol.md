@@ -3,10 +3,14 @@
 **Protocol version: 1.** This document is the version declaration; the `since`
 column in the message tables records the version each message was added in.
 
-Both sides implement it through one package, `@doola/sdk-protocol`
-(`packages/protocol`), which holds the message types, the inbound validators
-and the outbound payload projections. This document remains the specification:
-where the two disagree, the package has the bug.
+`@doola/sdk-protocol` (`packages/protocol`) exists so both sides can implement
+it from one place — message types, inbound validators, outbound payload
+projections. **Neither side imports it yet**: the loader still carries its own
+copy in `packages/loader/src/protocol.ts` and the app carries one in
+`doolahq/doola-sdk-app`, so until adoption lands, package behaviour is not
+loader behaviour and this document is the only thing they have in common. It
+remains the specification either way: where an implementation disagrees with
+it, the implementation has the bug.
 
 The contract between the loader (partner's page, doola code) and the embedded app
 (the SDK origin, inside the iframe). Internal to doola — partners never touch this —

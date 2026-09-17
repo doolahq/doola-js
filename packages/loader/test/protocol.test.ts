@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   envelope,
+  MIN_SUPPORTED_VERSION,
   negotiate,
   parseAppMessage,
   PROTOCOL_VERSION,
@@ -26,10 +27,16 @@ describe('parseAppMessage', () => {
     expect(parseAppMessage({ v: PROTOCOL_VERSION + 1, type: 'resize', payload: {} })).toBeNull();
   });
 
-  it('accepts N-1 messages', () => {
-    expect(
-      parseAppMessage({ v: PROTOCOL_VERSION - 1, type: 'resize', payload: { height: 1 } }),
-    ).not.toBeNull();
+  it('accepts the whole supported window and nothing outside it', () => {
+    // N-1 arithmetic is not the rule — at v1 it names 0, which is not a
+    // version. The window is [MIN_SUPPORTED_VERSION, PROTOCOL_VERSION], and
+    // both ends are closed; docs/protocol.md states the floor with the ceiling.
+    const resize = { type: 'resize', payload: { height: 1 } };
+
+    expect(parseAppMessage({ v: MIN_SUPPORTED_VERSION, ...resize })).not.toBeNull();
+    expect(parseAppMessage({ v: PROTOCOL_VERSION, ...resize })).not.toBeNull();
+    expect(parseAppMessage({ v: MIN_SUPPORTED_VERSION - 1, ...resize })).toBeNull();
+    expect(parseAppMessage({ v: PROTOCOL_VERSION + 1, ...resize })).toBeNull();
   });
 
   it('drops a known type whose payload has the wrong shape', () => {

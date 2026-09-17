@@ -88,13 +88,14 @@ const isLoadErrorType = oneOf(LOAD_ERROR_TYPES);
 const PRESENTATION_MODE: Record<PresentationMode, true> = { inline: true, fullScreen: true };
 const isPresentationMode = oneOf(Object.keys(PRESENTATION_MODE));
 
-// Structure only: a flat map whose values are a string or null. What the keys
-// mean belongs to the branding backend, not to the wire — see Appearance.
+// Structure only: a flat map of primitives. Which keys mean anything, and what
+// type each one is, belongs to the branding backend rather than the wire — see
+// Appearance for why a narrow check here drops whole messages.
+const isPrimitive = (x: unknown): boolean =>
+  x === null || typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean';
+
 const isAppearance = (x: unknown): boolean =>
-  typeof x === 'object' &&
-  x !== null &&
-  !Array.isArray(x) &&
-  Object.values(x).every((value) => value === null || isString(value));
+  typeof x === 'object' && x !== null && !Array.isArray(x) && Object.values(x).every(isPrimitive);
 
 /**
  * Structure only — a token and a lifetime that is a number. Whether a session

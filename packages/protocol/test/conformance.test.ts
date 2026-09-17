@@ -1,7 +1,13 @@
 import type { CustomerSession as ContractSession, DoolaAuthError, DoolaLoadError } from '@doola/js';
 import { describe, expect, it } from 'vitest';
 
-import type { AuthErrorType, CustomerSession, LoadErrorType } from '../src/messages';
+import type {
+  AuthErrorPayload,
+  AuthErrorType,
+  CustomerSession,
+  LoadErrorPayload,
+  LoadErrorType,
+} from '../src/messages';
 
 /**
  * This package declares the wire vocabulary itself so it can be published with
@@ -18,6 +24,11 @@ const authErrorMatches: Exact<AuthErrorType, DoolaAuthError['type']> = true;
 const loadErrorMatches: Exact<LoadErrorType, DoolaLoadError['type']> = true;
 const sessionMatches: Exact<CustomerSession, ContractSession> = true;
 
+// The tag alone is not the contract. These payloads reach partner code
+// unchanged, so renaming `message` on either error has to fail here too.
+const authPayloadMatches: Exact<AuthErrorPayload, DoolaAuthError> = true;
+const loadPayloadMatches: Exact<LoadErrorPayload, DoolaLoadError> = true;
+
 /**
  * `PresentationMode` deliberately has no counterpart. The contract's
  * `Presentation.mode` is the partner's request — `fullScreen` or `auto` — while
@@ -28,6 +39,12 @@ const sessionMatches: Exact<CustomerSession, ContractSession> = true;
 
 describe('wire vocabulary', () => {
   it('agrees with the public contract', () => {
-    expect(authErrorMatches && loadErrorMatches && sessionMatches).toBe(true);
+    expect(
+      authErrorMatches &&
+        loadErrorMatches &&
+        sessionMatches &&
+        authPayloadMatches &&
+        loadPayloadMatches,
+    ).toBe(true);
   });
 });

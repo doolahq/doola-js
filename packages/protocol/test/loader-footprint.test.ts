@@ -41,7 +41,8 @@ describe('loader footprint', () => {
     const code = await bundle(LOADER_IMPORTS, true);
     const size = gzipSync(code).length;
 
-    // Generous against today's ~925 B: this is a regression alarm, not a
+    // Generous against today's ~930 B, which moves a byte or two with the
+    // esbuild and zlib versions in play — this is a regression alarm, not a
     // target. Raise it in a PR that says what got bigger and why.
     expect(size, `loader-side bundle is ${size} bytes gzip`).toBeLessThan(1200);
   });

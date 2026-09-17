@@ -14,6 +14,16 @@ function parse<T>(data: unknown, spec: Spec): T | null {
   if (typeof type !== 'string') return null;
   if (typeof payload !== 'object' || payload === null) return null;
 
+  // An own-property check, not a bare index: `spec['constructor']` and every
+  // other Object.prototype member resolves to something truthy, and
+  // `acceptsAll` then iterates no fields and passes vacuously — so
+  // `type: '__proto__'` parsed as a valid message.
+  //
+  // `hasOwnProperty.call` rather than `Object.hasOwn`, which is ES2022 and
+  // this builds for ES2020 — the loader ships to whatever browser a partner's
+  // customer arrives with.
+  if (!Object.prototype.hasOwnProperty.call(spec, type)) return null;
+
   const fields = spec[type];
   if (!fields) return null;
 

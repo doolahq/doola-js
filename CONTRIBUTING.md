@@ -38,9 +38,12 @@ This section is the canonical definition; everything else in the repo points her
   the loader and the embedded app deploy independently, so it carries its own
   version and both sides support N−1. The package is published because the app
   lives in `doolahq/doola-sdk-app`, and a wire format maintained in two
-  repositories drifts. **Where the document and the package disagree, the
-  document wins and the package has the bug** — `spec-matches-docs.test.ts`
-  exists to notice.
+  repositories drifts. **Where the document and an implementation disagree, the
+  document wins.** `spec-matches-docs.test.ts` notices one slice of that: the
+  two must name the same messages and the same version. Payload fields are
+  covered from the other side — `SpecOf` makes a field the spec omits a `tsc`
+  error — which leaves a document edit to a payload cell as the gap neither
+  catches.
 
 ## Conventions
 

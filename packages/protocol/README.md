@@ -67,5 +67,5 @@ meaning of an existing field does.
 
 The loader is fetched on every page load of every partner site and its CI holds
 it to 6 KB gzip. `test/loader-footprint.test.ts` measures what this package
-costs that budget (~1.4 KB today) and asserts the app-side half tree-shakes
-away. Keep `sideEffects: false` and keep the exports named.
+costs that budget — ~0.9 KB today, minified the way the loader ships — and
+asserts the app-side half tree-shakes away. Keep `sideEffects: false` and keep the exports named.

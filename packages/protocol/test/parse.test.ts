@@ -54,7 +54,11 @@ describe('parseAppMessage payload rules', () => {
     ['companyId must be present', 'formed', {}],
     ['companyId must be a non-empty string', 'formed', { companyId: '' }],
     ['auth-error type must be a contract case', 'auth-error', { type: 'nope', message: 'x' }],
+    ['auth-error message must be a string', 'auth-error', { type: 'mint_failed', message: 42 }],
     ['load-error message must be a string', 'load-error', { type: 'api_error', message: 42 }],
+    ['load-error type must be a contract case', 'load-error', { type: 'kaboom', message: 'x' }],
+    ['top must be finite', 'scroll-request', { top: Number.NaN }],
+    ['top must be a number', 'scroll-request', { top: '10' }],
   ])('drops when %s', (_why, type, payload) => {
     expect(parseAppMessage({ v: PROTOCOL_VERSION, type, payload })).toBeNull();
   });
@@ -72,7 +76,8 @@ describe('parseLoaderMessage payload rules', () => {
     ],
     ['protocol is zero', 'init', { session, protocol: 0 }],
     ['locale is not a string', 'update', { locale: 42 }],
-    ['appearance holds a non-string', 'update', { appearance: { brand: 1 } }],
+    ['appearance holds a nested object', 'update', { appearance: { brand: { hex: '#fff' } } }],
+    ['appearance holds an array value', 'update', { appearance: { brand: ['#fff'] } }],
     ['appearance is an array', 'update', { appearance: ['#fff'] }],
     ['retryable is missing', 'token-error', { reason: 'mint_failed', message: 'x' }],
     [
@@ -87,9 +92,40 @@ describe('parseLoaderMessage payload rules', () => {
       'init',
       { session, protocol: 1, presentation: 'fullscreen' },
     ],
+    // The guard spec.ts calls load-bearing: a non-positive lifetime becomes a
+    // renewal timer that reschedules on every tick.
+    ['expiresIn is zero', 'token', { session: { accessToken: 'cs_x', expiresIn: 0 } }],
+    ['expiresIn is negative', 'token', { session: { accessToken: 'cs_x', expiresIn: -1 } }],
+    ['init locale is not a string', 'init', { session, protocol: 1, locale: 42 }],
+    ['init appearance is not a map', 'init', { session, protocol: 1, appearance: 'blue' }],
+    [
+      'token-error message is not a string',
+      'token-error',
+      { reason: 'mint_failed', message: 42, retryable: true },
+    ],
   ])('drops when %s', (_why, type, payload) => {
     expect(parseLoaderMessage({ v: PROTOCOL_VERSION, type, payload })).toBeNull();
   });
+
+  it.each([
+    ['a null value, which is what the backend sent before PENG-6667', { brand: null }],
+    ['a boolean, which is what attribution is', { attribution: true }],
+    ['a number', { radius: 8 }],
+    ['a string', { brand: '#F9C800' }],
+  ])('accepts appearance holding %s', (_why, appearance) => {
+    // Narrowing this drops the whole update, not the one key — see Appearance.
+    expect(
+      parseLoaderMessage({ v: PROTOCOL_VERSION, type: 'update', payload: { appearance } }),
+    ).not.toBeNull();
+  });
+
+  it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'])(
+    'ignores %s, which is on Object.prototype rather than in the spec',
+    (type) => {
+      expect(parseAppMessage({ v: PROTOCOL_VERSION, type, payload: {} })).toBeNull();
+      expect(parseLoaderMessage({ v: PROTOCOL_VERSION, type, payload: {} })).toBeNull();
+    },
+  );
 
   it('accepts a session that carries expiresAt', () => {
     const payload = {

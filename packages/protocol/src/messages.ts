@@ -67,14 +67,25 @@ export type PresentationMode = 'inline' | 'fullScreen';
  * is owned by the branding backend (docs/protocol.md), and the app applies only
  * the ones it knows.
  *
- * Values are nullable because the backend sends nulls: before PENG-6667 a
- * partner who never opened the portal got every field as an explicit `null`
- * rather than absent, and the two sides deploy independently, so a frame
- * meeting the old shape mid-rollout must still parse. Rejecting one null field
- * fails the whole `init`, which drops the session and leaves the frame loading
- * forever.
+ * Values are deliberately wide. `acceptsAll` fails the whole payload when one
+ * field fails, so a value type this does not list does not lose that key — it
+ * drops the `init` or `update` entirely, and the frame keeps whatever it had.
+ * Two shapes the backend already sends prove the point: `attribution` is a
+ * boolean, and before PENG-6667 a partner who never opened the portal got
+ * every field as an explicit `null` rather than absent. Both must parse.
+ *
+ * What a key *means* is the branding backend's (docs/protocol.md); the wire
+ * checks that the thing is a flat map of primitives and stops there.
  */
-export type Appearance = Record<string, string | null>;
+export type Appearance = Record<string, string | number | boolean | null>;
+
+/**
+ * Forwarded verbatim to the partner's `onAuthError` / `onLoadError`, so these
+ * are the contract's own error objects and conformance.test.ts asserts the
+ * whole shape rather than the tag alone.
+ */
+export type AuthErrorPayload = { type: AuthErrorType; message: string };
+export type LoadErrorPayload = { type: LoadErrorType; message: string };
 
 /** App -> mounting peer (the loader, or the portal's preview). */
 export type AppMessage =
@@ -83,8 +94,8 @@ export type AppMessage =
   | { type: 'scroll-request'; payload: { top: number } }
   | { type: 'token-request'; payload: Record<string, never> }
   | { type: 'formed'; payload: { companyId: string } }
-  | { type: 'auth-error'; payload: { type: AuthErrorType; message: string } }
-  | { type: 'load-error'; payload: { type: LoadErrorType; message: string } }
+  | { type: 'auth-error'; payload: AuthErrorPayload }
+  | { type: 'load-error'; payload: LoadErrorPayload }
   | { type: 'loader-start'; payload: Record<string, never> };
 
 /** Mounting peer -> app. */
