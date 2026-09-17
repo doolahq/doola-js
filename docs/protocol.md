@@ -3,11 +3,23 @@
 **Protocol version: 1.** This document is the version declaration; the `since`
 column in the message tables records the version each message was added in.
 
+`@doola/sdk-protocol` (`packages/protocol`) exists so both sides can implement
+it from one place — message types, inbound validators, outbound payload
+projections. **Neither side imports it yet**: the loader still carries its own
+copy in `packages/loader/src/protocol.ts` and the app carries one in
+`doolahq/doola-sdk-app`, so until adoption lands, package behaviour is not
+loader behaviour and this document is the only thing they have in common. It
+remains the specification either way: where an implementation disagrees with
+it, the implementation has the bug.
+
 The contract between the loader (partner's page, doola code) and the embedded app
 (the SDK origin, inside the iframe). Internal to doola — partners never touch this —
 but versioned like a public API because **the two sides deploy independently**:
 on every deploy, new-loader-with-old-app and old-loader-with-new-app both exist
-in the wild for minutes. Both sides MUST support protocol version N−1.
+in the wild for minutes. Both sides MUST accept the closed window
+`[MIN_SUPPORTED_VERSION, PROTOCOL_VERSION]`, which is what "support N−1" means
+once there is an N−1 to support — at version 1 the window is `[1, 1]`, because
+0 is not a version. A receiver drops anything outside it, at either end.
 
 N−1 covers only this pair, which deploys minutes apart. The shim ↔ loader pair
 lives under a much stricter rule — every published shim version, for as long as
@@ -43,6 +55,12 @@ each side drops anything whose `v` is above its own maximum, which would
 otherwise reject its peer's traffic immediately after a successful downgrade.
 Before `init` only `ready` exists, and it carries the app's maximum because
 that is the number being negotiated with.
+
+A receiver drops a message whose `v` is above its own maximum, and equally one
+below the oldest version it still supports. Both ends of that window are part of
+the rule: the ceiling stops a peer claiming a version this side cannot read, and
+the floor is how a retired version stops being spoken to rather than being
+half-understood.
 
 ## Origin and source checks — both directions, no exceptions
 

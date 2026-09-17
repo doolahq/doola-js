@@ -7,10 +7,10 @@
   },
   "scripts": {
     "typecheck": "pnpm -r typecheck",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "test": "pnpm -r test",
     "build": "pnpm -r build",
-    "test": "pnpm -r test"
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
