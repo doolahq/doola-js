@@ -16,21 +16,37 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Nothing here uses GITHUB_TOKEN. The branch push, the version pull request and
+# the release tags all go through the doola-semantic-release GitHub App, the
+# same identity partners-portal releases under.
 permissions:
-  # Push the changeset-release/main branch, and the git tags `publish` creates.
-  contents: write
-  # Open and update the version pull request.
-  pull-requests: write
+  contents: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
+      # The App rather than GITHUB_TOKEN, and not only for the shared identity:
+      # a pull request opened with GITHUB_TOKEN triggers no workflows, so the
+      # version pull request — the one whose diff is the versions about to be
+      # published — would arrive with no CI having run on it.
+      #
+      # The App has no `workflows` permission, which is fine: `changeset version`
+      # touches package.json, CHANGELOG.md and .changeset/ and nothing under
+      # .github/.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ secrets.SEMANTIC_RELEASE_APP_ID }}
+          private-key: ${{ secrets.SEMANTIC_RELEASE_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v7
         with:
           # Tags included: `changeset publish` skips a version whose tag it can
           # already see, and a shallow clone has none of them.
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: ./.github/actions/setup
 
@@ -72,4 +88,4 @@ jobs:
           commit: 'chore(release): version packages'
           title: 'chore(release): version packages'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

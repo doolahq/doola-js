@@ -27,17 +27,17 @@ never be reused.
 
 ### One-time setup
 
-Neither package exists on npm yet and the `@doola` scope is unclaimed, so the
-first release needs these once, in this order:
+Neither package exists on npm yet, so the first release needs these once:
 
-1. **Create the `@doola` organisation** on npmjs.com. Claim it whether or not
-   the first publish is imminent — a scope someone else takes is not
-   recoverable, and both package names are already written into the README, this
-   repo's docs and doola-sdk-app.
-2. **Create an automation access token** with publish rights on the scope, and
-   add it as the repository secret `NPM_TOKEN`. Classic _Automation_ is the type
-   that works unattended: it is exempt from the 2FA prompt that would otherwise
-   stop a CI publish.
+1. **An npm automation token** with publish rights on the `@doola` scope, added
+   as the repository secret `NPM_TOKEN`. Classic _Automation_ is the type that
+   works unattended: it is exempt from the 2FA prompt that would otherwise stop
+   a CI publish. This is the only credential the release needs that the release
+   App cannot provide — publishing to npm is not something a GitHub App can do.
+2. **The `doola-semantic-release` App with access to this repository**, and its
+   two org secrets (`SEMANTIC_RELEASE_APP_ID`, `SEMANTIC_RELEASE_APP_PRIVATE_KEY`)
+   visible to it. This is the identity partners-portal already releases under;
+   if those secrets are scoped to selected repositories, doola-js needs adding.
 3. Nothing else to configure. `access: public` is already set in
    `.changeset/config.json`, which is what lets a scoped package publish
    publicly on the first try.
