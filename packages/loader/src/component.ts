@@ -3,7 +3,21 @@ import type { DoolaOptions } from '@doola/js';
 import { envelope, negotiate, parseAppMessage, type LoaderMessage } from './protocol';
 import type { SessionManager } from './session';
 
-const INLINE_FRAME_CSS = 'width:100%;border:0;display:block;height:0;';
+/**
+ * The frame starts at a placeholder height, not at 0. The app cannot report a
+ * height until it is running and connected, so anything the frame shows before
+ * that — the bundle still downloading, "connecting", the auth screen a failed
+ * first mint produces, and the error boundary after a crash that took the
+ * app's ResizeObserver down with it — would paint into a zero-height box and
+ * the founder would see nothing at all.
+ *
+ * The loader owns the box, so the loader owns its default. The first `resize`
+ * replaces this with the real content height, usually within a frame or two of
+ * mount; until then it also reserves space on the partner's page instead of
+ * shifting their layout when the frame finally has something to show.
+ */
+const PLACEHOLDER_FRAME_HEIGHT_PX = 160;
+const INLINE_FRAME_CSS = `width:100%;border:0;display:block;height:${PLACEHOLDER_FRAME_HEIGHT_PX}px;`;
 const FULLSCREEN_FRAME_CSS =
   'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;';
 
@@ -258,14 +272,15 @@ export class FrameController {
       // while inline is also the correct one — the app keeps reporting heights
       // while full screen, and those are measured against a different viewport.
       //
-      // A frame that mounts already under the breakpoint captures `height:0`,
-      // because it goes full screen before the app has negotiated anything and
-      // `resize` is ignored from then on. Its first return to inline therefore
-      // shows 0px until the next `resize`, which follows within a frame or two
-      // since the app's observer watches documentElement and the viewport just
-      // changed. That is correct, not a gap: the loader never knew an inline
-      // height, and the last full-screen one would be measured against the
-      // wrong viewport. Do not "fix" it by restoring that.
+      // A frame that mounts already under the breakpoint captures the
+      // placeholder, because it goes full screen before the app has negotiated
+      // anything and `resize` is ignored from then on. Its first return to
+      // inline therefore shows the placeholder until the next `resize`, which
+      // follows within a frame or two since the app's observer watches
+      // documentElement and the viewport just changed. That is correct, not a
+      // gap: the loader never knew an inline height, and the last full-screen
+      // one would be measured against the wrong viewport. Do not "fix" it by
+      // restoring that.
       const inlineStyles = iframe.style.cssText;
 
       iframe.style.cssText = FULLSCREEN_FRAME_CSS;
