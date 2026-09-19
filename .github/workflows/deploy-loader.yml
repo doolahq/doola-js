@@ -48,6 +48,14 @@ jobs:
       HOSTNAME: ${{ vars.LOADER_HOSTNAME }}
       KEY: v1/doola.js
       BUNDLE: packages/loader/dist/index.global.js
+      # Explicitly not immutable: `/v1/doola.js` is a permanent URL serving
+      # mutable content, so a browser that caches it for a year runs last
+      # year's loader on a partner's page. The content type is set rather than
+      # inferred, because a script served as the wrong type is refused by any
+      # partner sending `X-Content-Type-Options: nosniff`. Declared once so the
+      # skip below checks exactly what the publish step writes.
+      CACHE_CONTROL: public, max-age=300, must-revalidate
+      CONTENT_TYPE: text/javascript; charset=utf-8
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -75,33 +83,38 @@ jobs:
       # for it. Comparing first is what keeps that wait affordable enough to be
       # worth doing properly below.
       #
-      # A skip, so it is safe to be wrong: the ETag is the md5 only for a
-      # single-part, SSE-S3 object, and anything that stops being true here
-      # simply never matches and deploys anyway.
-      - name: Skip if the edge already has this bundle
+      # The skip needs the edge as well as the origin. A run that uploaded and
+      # then failed its invalidation or verification leaves the origin current
+      # and the edge stale, and a retry that looked only at the origin would
+      # report success past the one repair it exists for. The origin's metadata
+      # is compared too, so a header change still deploys unchanged bytes.
+      #
+      # A skip, so it is safe to be wrong in one direction only: the ETag is the
+      # md5 only for a single-part, SSE-S3 object, and anything that stops being
+      # true here simply never matches and deploys anyway.
+      - name: Skip if the edge already serves this bundle
         id: compare
         run: |
-          REMOTE=$(aws s3api head-object --bucket "$BUCKET" --key "$KEY" --query ETag --output text 2>/dev/null || true)
-          LOCAL=$(md5sum "$BUNDLE" | cut -d' ' -f1)
+          ORIGIN=$(aws s3api head-object --bucket "$BUCKET" --key "$KEY" \
+            --query '[ETag, CacheControl, ContentType]' --output text 2>/dev/null) || true
+          EXPECTED=$(printf '"%s"\t%s\t%s' "$(md5sum "$BUNDLE" | cut -d' ' -f1)" "$CACHE_CONTROL" "$CONTENT_TYPE")
 
-          if [ "$(printf '%s' "$REMOTE" | tr -d '"')" = "$LOCAL" ]; then
+          SERVED=$(curl -fsS "https://$HOSTNAME/$KEY" 2>/dev/null | sha256sum | cut -d' ' -f1) || true
+          LOCAL=$(sha256sum "$BUNDLE" | cut -d' ' -f1)
+
+          if [ "$ORIGIN" = "$EXPECTED" ] && [ "$SERVED" = "$LOCAL" ]; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
-            echo "\`$KEY\` is already the bundle this commit builds." >> "$GITHUB_STEP_SUMMARY"
+            echo "\`https://$HOSTNAME/$KEY\` already serves this commit's bundle (sha256 \`$LOCAL\`)." >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
           fi
 
-      # Explicitly not immutable: `/v1/doola.js` is a permanent URL serving
-      # mutable content, so a browser that caches it for a year runs last
-      # year's loader on a partner's page. The content type is set rather than
-      # inferred, because a script served as the wrong type is refused by any
-      # partner sending `X-Content-Type-Options: nosniff`.
       - name: Publish the loader
         if: steps.compare.outputs.changed == 'true'
         run: |
           aws s3 cp "$BUNDLE" "s3://$BUCKET/$KEY" \
-            --cache-control 'public, max-age=300, must-revalidate' \
-            --content-type 'text/javascript; charset=utf-8' \
+            --cache-control "$CACHE_CONTROL" \
+            --content-type "$CONTENT_TYPE" \
             --no-progress
 
       # Waited on rather than fired and forgotten, because until it completes

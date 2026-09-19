@@ -67,10 +67,12 @@ worth having is the last step: it fetches the public URL and compares what the
 edge serves against what the commit built, so every push to main rehearses the
 production path end to end.
 
-A run whose bundle is byte-identical to what the origin already holds skips the
-upload, the invalidation and the verification. That is the common case for a
-`version packages` merge, which changes manifests and changelogs but not the
-loader.
+A run skips the upload, the invalidation and the verification only when the
+origin already holds this bundle with the expected headers **and** the public
+URL already serves it. That is the common case for a `version packages` merge,
+which changes manifests and changelogs but not the loader. Checking the edge
+too is what makes a re-run the repair for a deploy that uploaded and then
+failed to invalidate or verify.
 
 ### One-time setup
 
