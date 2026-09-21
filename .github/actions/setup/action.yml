@@ -1,0 +1,13 @@
+name: Setup
+description: Checkout-adjacent toolchain setup shared by every job.
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+    - uses: actions/setup-node@v7
+      with:
+        node-version-file: .nvmrc
+        cache: pnpm
+    - run: pnpm install --frozen-lockfile
+      shell: bash

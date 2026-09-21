@@ -46,8 +46,9 @@ app.post('/doola-session', async (req, res) => {
   // customer's session — forwarding it would loop them to your login.
   if (!r.ok) return res.status(r.status === 401 ? 502 : r.status).end();
 
-  // forward exactly the fields the loader consumes, never the whole body
-  const { accessToken, expiresIn } = await r.json();
+  // doola wraps every response in { payload, error }. Forward exactly the
+  // fields the loader consumes, never the whole body.
+  const { accessToken, expiresIn } = (await r.json()).payload;
   res.json({ accessToken, expiresIn });
 });
 ```

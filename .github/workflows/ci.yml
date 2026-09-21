@@ -14,26 +14,17 @@ permissions:
 
 jobs:
   check:
+    # Named so it is a stable status-check context. `main` does not require one
+    # today, which is why release and deploy each re-run what they depend on;
+    # doola-sdk-app's ruleset does require its four, and this is what a rule
+    # here would name.
+    name: Typecheck, tests and budgets
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
       - run: pnpm typecheck
       - run: pnpm format:check
       - run: pnpm test
       - run: pnpm build
-      - name: shim stays a shim (gzip < 3KB)
-        run: |
-          SIZE=$(gzip -c packages/js/dist/index.js | wc -c)
-          echo "@doola/js esm gzip: ${SIZE} bytes"
-          test "$SIZE" -lt 3072
-      - name: loader stays lean (gzip < 6KB)
-        run: |
-          SIZE=$(gzip -c packages/loader/dist/index.global.js | wc -c)
-          echo "loader iife gzip: ${SIZE} bytes"
-          test "$SIZE" -lt 6144
+      - run: node scripts/check-budgets.mjs
