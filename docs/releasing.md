@@ -29,11 +29,21 @@ never be reused.
 
 Neither package exists on npm yet, so the first release needs these once:
 
-1. **An npm automation token** with publish rights on the `@doola` scope, added
-   as the repository secret `NPM_TOKEN`. Classic _Automation_ is the type that
-   works unattended: it is exempt from the 2FA prompt that would otherwise stop
-   a CI publish. This is the only credential the release needs that the release
-   App cannot provide — publishing to npm is not something a GitHub App can do.
+1. **An npm automation token — already configured.** `NPM_TOKEN` is a
+   repository secret on this repo. Classic _Automation_ is the type that works
+   unattended: it is exempt from the 2FA prompt that would otherwise stop a CI
+   publish. This is the only credential the release needs that the release App
+   cannot provide — publishing to npm is not something a GitHub App can do.
+
+   Where it sits is still open. Every other credential here reaches CI through
+   OIDC into an Environment pinned to `main`, and production adds a named
+   reviewer; this one is repository-scoped, so any workflow run on any branch
+   can read it, and the release job declares no `environment:`, so publishing
+   needs no approval. That is backwards: a bad loader deploy expires from the
+   edge in minutes, a bad publish is permanent in every lockfile. Moving the
+   secret onto an Environment and gating the publish closes both halves, and
+   npm Trusted Publishing removes the token altogether (PENG-6617).
+
 2. **The `doola-semantic-release` App with access to this repository**, and its
    two org secrets (`SEMANTIC_RELEASE_APP_ID`, `SEMANTIC_RELEASE_APP_PRIVATE_KEY`)
    visible to it. This is the identity partners-portal already releases under;
@@ -43,8 +53,10 @@ Neither package exists on npm yet, so the first release needs these once:
    publicly on the first try.
 4. **Once the first version is live**, delete the `NPM_TOKEN`-unset branch in
    `release.yml`. It exists so that a version pull request can still be opened
-   before the scope is claimed. Left in afterwards it turns an expired token
-   into a green run that published nothing, which is worse than a red one.
+   before the scope is claimed, and with the secret configured it is already
+   unreachable here — so it protects against a deleted secret, never an expired
+   one, which fails at publish as it should. Left in afterwards it is only a way
+   for a release to go green having published nothing, which is worse than red.
 
 ### Why `pnpm publish` and not `npm publish`
 
@@ -76,16 +88,16 @@ failed to invalidate or verify.
 
 ### One-time setup
 
-The IAM roles exist (PENG-6611) and both GitHub Environments exist. What is
-missing is the wiring between them — set these as **environment** variables on
-`development` and `production`:
+The IAM roles exist (PENG-6611), both GitHub Environments exist, and the
+variables below are set on each. Nothing here is outstanding; they are written
+down because a wrong value is how this breaks.
 
-| Variable                 | Value                                                          |
-| ------------------------ | -------------------------------------------------------------- |
-| `AWS_DEPLOY_ROLE_ARN`    | that account's `github_ci_doola_sdk_loader_role_arn` output    |
-| `LOADER_BUCKET`          | `development-doola-sdk-loader` / `production-doola-sdk-loader` |
-| `LOADER_DISTRIBUTION_ID` | the distribution fronting `js.test.doola.com` / `js.doola.com` |
-| `LOADER_HOSTNAME`        | `js.test.doola.com` / `js.doola.com`                           |
+| Variable                 | `development`                                               | `production`                    |
+| ------------------------ | ----------------------------------------------------------- | ------------------------------- |
+| `AWS_DEPLOY_ROLE_ARN`    | that account's `github_ci_doola_sdk_loader_role_arn` output |
+| `LOADER_BUCKET`          | `development-doola-sdk-loader`                              | `production-doola-sdk-loader`   |
+| `LOADER_DISTRIBUTION_ID` | the distribution fronting `js.test.doola.com`               | the one fronting `js.doola.com` |
+| `LOADER_HOSTNAME`        | `js.test.doola.com`                                         | `js.doola.com`                  |
 
 The distribution id is configured rather than looked up because the deploy role
 grants `CreateInvalidation` and `GetInvalidation` on one distribution ARN and no
