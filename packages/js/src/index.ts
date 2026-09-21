@@ -62,6 +62,13 @@ function injectLoader(): Promise<DoolaGlobal> {
 
     script.src = LOADER_URL;
     script.async = true;
+    // Without this an uncaught error inside the loader reaches the partner's
+    // own window.onerror as the opaque "Script error." with no file, line or
+    // stack, on their site, where we cannot reproduce it. js.doola.com serves
+    // `Access-Control-Allow-Origin: *` (cloudfront-partner-sdk-headers.tf), so
+    // the fetch is unaffected — but it now depends on that header, and
+    // narrowing it to an allowlist would stop the loader loading at all.
+    script.crossOrigin = 'anonymous';
     document.head.appendChild(script);
   });
 
