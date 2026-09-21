@@ -19,7 +19,9 @@ contract version".
 Every user-facing change carries a changeset (`pnpm changeset`). Merging that to
 `main` opens a **version packages** pull request whose diff is the version bumps
 and the changelog entries partners will read; approving and merging it is what
-publishes.
+publishes. That merge runs the `publish` job, which waits on the `production`
+Environment's reviewer before anything reaches the registry, so npm needs two
+approvals: the version pull request and the deployment.
 
 Nothing reaches npm without that second merge, which matters because npm is
 permanent: the unpublish window is 72 hours and a version number, once used, can
@@ -29,23 +31,28 @@ never be reused.
 
 Neither package exists on npm yet, so the first release needs these once:
 
-1. **An npm automation token — already configured.** `NPM_TOKEN` is a
-   repository secret on this repo. Classic _Automation_ is the type that works
-   unattended: it is exempt from the 2FA prompt that would otherwise stop a CI
-   publish. This is the only credential the release needs that the release App
-   cannot provide — publishing to npm is not something a GitHub App can do.
+1. **An npm automation token**, on the `production` Environment as the secret
+   `NPM_TOKEN`. Classic _Automation_ is the type that works unattended: it is
+   exempt from the 2FA prompt that would otherwise stop a CI publish. This is
+   the only credential the release needs that the release App cannot provide,
+   since publishing to npm is not something a GitHub App can do.
 
-   Where it sits is still open. Every AWS credential here reaches CI through
-   OIDC into an Environment pinned to `main`, and production adds a named
-   reviewer; this one is repository-scoped, so any workflow run on any branch
-   can read it, and the release job declares no `environment:`, so publishing
-   needs no approval. The release App's two org secrets are ungated the same
-   way, but they only mint a GitHub token scoped to this repository — this is
-   the credential that reaches npm. That is backwards: a bad loader deploy
-   expires from the edge in minutes, a bad publish is permanent in every
-   lockfile. Moving the secret onto an Environment and gating the publish closes
-   both halves, and npm Trusted Publishing removes the token altogether
-   (PENG-6617).
+   **On the Environment, not the repository.** A repository secret is readable
+   by any workflow run on any branch, including a `pull_request` run nobody
+   reviewed, and it carries no approval of its own. Every AWS credential here
+   already reaches CI through OIDC into an Environment pinned to `main`, with a
+   named reviewer on `production`. The release App's two org secrets are read
+   ungated the same way, but they only mint a GitHub token scoped to this
+   repository — this is the credential that reaches npm.
+
+   `NPM_TOKEN` is a repository secret as of 2026-09-22. Add it to the
+   `production` Environment and delete the repository copy, in that order: an
+   Environment secret shadows the repository one, so the gap closes before it
+   opens.
+
+   npm Trusted Publishing removes the token altogether and is the end state
+   (PENG-6617); this is the shape to hold until the first publish makes that
+   configurable.
 
 2. **The `doola-semantic-release` App with access to this repository**, and its
    two org secrets (`SEMANTIC_RELEASE_APP_ID`, `SEMANTIC_RELEASE_APP_PRIVATE_KEY`)
@@ -54,12 +61,6 @@ Neither package exists on npm yet, so the first release needs these once:
 3. Nothing else to configure. `access: public` is already set in
    `.changeset/config.json`, which is what lets a scoped package publish
    publicly on the first try.
-4. **Once the first version is live**, delete the `NPM_TOKEN`-unset branch in
-   `release.yml`. It exists so that a version pull request can still be opened
-   before the scope is claimed, and with the secret configured it is already
-   unreachable here — so it protects against a deleted secret, never an expired
-   one, which fails at publish as it should. Left in afterwards it is only a way
-   for a release to go green having published nothing, which is worse than red.
 
 ### Why `pnpm publish` and not `npm publish`
 
