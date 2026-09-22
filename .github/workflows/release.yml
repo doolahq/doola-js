@@ -23,9 +23,16 @@ permissions:
   contents: read
 
 jobs:
-  release:
+  # Opens and updates the version pull request. Deliberately not gated: it
+  # publishes nothing, needs no npm credential, and making someone approve the
+  # opening of a pull request is how a gate becomes a reflex -- which is the
+  # gate that matters below.
+  version:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
+      unpublished: ${{ steps.registry.outputs.unpublished }}
     steps:
       # The App rather than GITHUB_TOKEN, and not only for the shared identity:
       # a pull request opened with GITHUB_TOKEN triggers no workflows, so the
@@ -59,33 +66,118 @@ jobs:
       - run: pnpm build
       - run: node scripts/check-budgets.mjs
 
-      # Home config, not the repo's `.npmrc`: the version step commits what it
-      # touched, and a token in a tracked file is a token in the history.
+      # Whether this tree holds a version the registry does not, which is the
+      # question the gated job below asks a reviewer to answer. `hasChangesets`
+      # is not that question: it is also false on a docs or CI merge, and each
+      # of those would queue a production deployment approval for a
+      # `changeset publish` that no-ops.
       #
-      # A warning rather than a failure while the scope is still unclaimed: with
-      # no token the step below can still open the version pull request, which
-      # needs nothing from npm. Delete this branch once the first version is
-      # live (docs/releasing.md step 4) — after that, a token missing because it
-      # expired should fail rather than quietly publish nothing.
+      # Before `changeset version`, so it reads the versions as pushed rather
+      # than the bumps that belong to the version pull request. A registry it
+      # cannot reach counts as unpublished, which errs towards asking.
+      - name: Look for versions the registry does not have
+        id: registry
+        run: |
+          unpublished=false
+
+          for manifest in packages/*/package.json; do
+            [ -f "$manifest" ] || continue
+
+            if [ "$(node -p "!!require('./$manifest').private")" = 'true' ]; then
+              continue
+            fi
+
+            name=$(node -p "require('./$manifest').name")
+            version=$(node -p "require('./$manifest').version")
+
+            if [ -z "$(npm view "$name@$version" version 2>/dev/null || true)" ]; then
+              echo "$name@$version is not on the registry"
+              unpublished=true
+            fi
+          done
+
+          echo "unpublished=$unpublished" >> "$GITHUB_OUTPUT"
+
+      # No `publish` input and no npm credential: this job only ever runs
+      # `changeset version`. Publishing is the job below.
+      - uses: changesets/action@v1
+        id: changesets
+        with:
+          commit: 'chore(release): version packages'
+          title: 'chore(release): version packages'
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  # The publish itself, behind the `production` Environment: its required
+  # reviewer, and its branch policy pinning deployments to `main`.
+  #
+  # Gated because npm is the one irreversible step in this repo. A bad loader
+  # deploy is a short cache TTL and a re-run; a bad publish is permanent in
+  # every partner's lockfile, and a version number can never be reused.
+  #
+  # Runs on the push that leaves no changesets behind *and* carries a version
+  # the registry does not have, which together are the version pull request
+  # being merged. The second half is what keeps this gate meaningful: without
+  # it every docs or CI merge would request an approval for a publish with
+  # nothing to publish, and an approval that means nothing half the time is the
+  # reflex click this split exists to avoid.
+  #
+  # Both halves are written to err towards running -- `!= 'true'` and
+  # `!= 'false'` rather than the positive forms -- so a missing output still
+  # reaches the job. `changeset publish` is a no-op when every version is
+  # already on the registry, whereas a skipped job is a release that silently
+  # shipped nothing.
+  publish:
+    needs: version
+    if: needs.version.outputs.hasChangesets != 'true' && needs.version.outputs.unpublished != 'false'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ secrets.SEMANTIC_RELEASE_APP_ID }}
+          private-key: ${{ secrets.SEMANTIC_RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v7
+        with:
+          # Tags included: `changeset publish` skips a version whose tag it can
+          # already see, and a shallow clone has none of them.
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: ./.github/actions/setup
+
+      # Rebuilt here rather than carried from `version` as an artifact: this is
+      # the tree `changeset publish` packs, so building it in the same job is
+      # what keeps the bytes measured the bytes shipped.
+      - run: pnpm build
+      - run: node scripts/check-budgets.mjs
+
+      # Home config, not the repo's `.npmrc`: a token in a tracked file is a
+      # token in the history.
+      #
+      # Fails rather than warns. This job only runs when something is due to
+      # publish, so a missing token is misconfiguration, most likely the secret
+      # not being on this Environment, and a release that goes green having
+      # published nothing is worse than a red one.
       - name: Authenticate to npm
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "$NPM_TOKEN" ]; then
-            echo "::warning::NPM_TOKEN is unset, so nothing can publish. See docs/releasing.md."
-            exit 0
+            echo "::error::NPM_TOKEN is unset on the production Environment. See docs/releasing.md."
+            exit 1
           fi
 
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
 
-      # `version` is left at its default (`changeset version`). `publish` runs
-      # through pnpm, which is what makes the packages installable at all: the
-      # `publishConfig` blocks rewrite `exports` from TypeScript source to built
-      # `dist`, and plain `npm publish` ignores them.
+      # `publish` runs through pnpm, which is what makes the packages
+      # installable at all: the `publishConfig` blocks rewrite `exports` from
+      # TypeScript source to built `dist`, and plain `npm publish` ignores them.
       - uses: changesets/action@v1
         with:
           publish: pnpm run release
-          commit: 'chore(release): version packages'
-          title: 'chore(release): version packages'
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
