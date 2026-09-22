@@ -21,7 +21,9 @@ Every user-facing change carries a changeset (`pnpm changeset`). Merging that to
 and the changelog entries partners will read; approving and merging it is what
 publishes. That merge runs the `publish` job, which waits on the `production`
 Environment's reviewer before anything reaches the registry, so npm needs two
-approvals: the version pull request and the deployment.
+approvals: the version pull request and the deployment. Nothing else asks for
+the second one — the job runs only when the tree holds a version the registry
+does not, so an ordinary merge to `main` queues no deployment at all.
 
 Nothing reaches npm without that second merge, which matters because npm is
 permanent: the unpublish window is 72 hours and a version number, once used, can
