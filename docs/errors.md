@@ -43,5 +43,15 @@ exists and the partner's page is the only place a founder can be told.
 
 The loader raises it when a frame's document has loaded but no `ready` follows
 within a few seconds, and on a longer backstop when the document never loads at
-all. It leaves the frame's placeholder height in place rather than collapsing
-it, so the partner decides what that space becomes.
+all. The `message` says which of the three it was — the document never loaded,
+it loaded but never started, or it spoke a protocol version this loader does not
+support — so the string is worth logging rather than replacing.
+
+An **inline** frame keeps its placeholder height, so the partner decides what
+that space becomes. A **full-screen** frame does not: on a narrow viewport
+`presentation: "auto"` promotes the frame to a fixed full-viewport overlay and
+locks the page scroll _before_ the document resolves, so a failure there would
+otherwise leave the founder on a blank sheet they cannot scroll off. The loader
+releases the overlay and the scroll lock when it reports, returning the frame to
+its inline placeholder. It did not ask before promoting it, so it does not wait
+to be asked before putting it back.

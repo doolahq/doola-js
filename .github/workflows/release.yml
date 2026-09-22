@@ -59,6 +59,7 @@ jobs:
 
       # Re-run rather than trust CI: the two race on the same commit and `main`
       # requires no status check, so without this a red build publishes.
+      - uses: ./.github/actions/playwright
       - run: pnpm typecheck
       - run: pnpm test
       # Also what gets published: `release` deliberately does not rebuild, so

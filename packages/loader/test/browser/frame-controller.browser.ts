@@ -44,6 +44,26 @@ interface AppWindow extends Window {
 
 const ready = { v: PROTOCOL_VERSION, type: 'ready', payload: { protocolMax: PROTOCOL_VERSION } };
 
+/** The harness app page, for tests that serve the document themselves. */
+const APP_STUB = `<!doctype html><script>
+  window.__received = [];
+  addEventListener('message', (e) => window.__received.push({ origin: e.origin, data: e.data }));
+  window.__send = (m, o) => parent.postMessage(m, o || '*');
+</script>`;
+
+/**
+ * Frozen, not merely faked. `clock.install()` alone keeps ticking with real
+ * time, so a test that fast-forwards to just inside a deadline can cross it on
+ * the wall clock while it waits for the browser — which is how the ceiling test
+ * below first passed against the bug it exists to catch.
+ */
+async function freezeClock(page: Page): Promise<void> {
+  const epoch = new Date('2026-01-01T00:00:00Z');
+
+  await page.clock.install({ time: epoch });
+  await page.clock.pauseAt(epoch);
+}
+
 /** Past whichever deadline is armed, driven through the clock so the suite stays in seconds. */
 const PAST_GRACE_MS = READY_AFTER_LOAD_MS + 1_000;
 const PAST_BACKSTOP_MS = LOAD_BACKSTOP_MS + 1_000;
@@ -146,6 +166,20 @@ function updateLocale(page: Page, locale: string): Promise<void> {
   return page.evaluate((l) => {
     (window as unknown as PartnerWindow).__instance.update({ locale: l });
   }, locale);
+}
+
+/** What a founder is actually looking at, and whether they can scroll off it. */
+function overlayState(page: Page): Promise<{ fixed: boolean; scrollLocked: boolean }> {
+  return page.evaluate(() => ({
+    fixed: (document.querySelector('iframe')?.style.position ?? '') === 'fixed',
+    scrollLocked: document.documentElement.style.overflow === 'hidden',
+  }));
+}
+
+async function loadErrorMessage(page: Page): Promise<string> {
+  const [error] = await eventsOf(page, 'onLoadError');
+
+  return (error?.error as { message?: string } | undefined)?.message ?? '';
 }
 
 function frameHeight(page: Page): Promise<string> {
@@ -302,7 +336,7 @@ test('a malformed checkout-request is dropped, not thrown on', async ({ page }) 
 });
 
 test('a frame that loads but never says ready is reported after the grace', async ({ page }) => {
-  await page.clock.install();
+  await freezeClock(page);
   await mount(page);
   await appFrame(page);
 
@@ -316,10 +350,14 @@ test('a frame that loads but never says ready is reported after the grace', asyn
   await page.clock.fastForward(PAST_GRACE_MS);
   await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
   expect((await eventsOf(page, 'onLoadError'))[0]?.error).toMatchObject({ type: 'render_error' });
+
+  // Asserted, because this string is the only thing that reaches a support
+  // ticket and all three causes used to share one sentence.
+  expect(await loadErrorMessage(page)).toBe('The doola frame loaded but never started.');
 });
 
 test('a document that 404s is reported on the same grace', async ({ page }) => {
-  await page.clock.install();
+  await freezeClock(page);
   await interceptFrame(page, (route) => route.fulfill({ status: 404, body: 'nope' }));
   await mount(page);
 
@@ -328,7 +366,7 @@ test('a document that 404s is reported on the same grace', async ({ page }) => {
 });
 
 test('a document that never arrives is reported by the backstop', async ({ page }) => {
-  await page.clock.install();
+  await freezeClock(page);
   // Never fulfilled, so `load` never fires and the grace is never armed.
   await interceptFrame(page, () => {});
   await mount(page);
@@ -339,10 +377,85 @@ test('a document that never arrives is reported by the backstop', async ({ page 
 
   await page.clock.fastForward(PAST_BACKSTOP_MS);
   await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+  expect(await loadErrorMessage(page)).toBe('The doola frame did not load.');
+});
+
+test('a refused handshake is reported as a version skew, not a boot failure', async ({ page }) => {
+  await freezeClock(page);
+  await mount(page);
+  const frame = await appFrame(page);
+
+  // The frame loaded, booted and spoke — at a version this loader refuses, so
+  // `parseAppMessage` drops it and the deadline still expires. Reporting that
+  // as "never started" hides exactly the skew the N-1 window exists to surface.
+  await sendFromApp(frame, {
+    v: PROTOCOL_VERSION + 1,
+    type: 'ready',
+    payload: { protocolMax: PROTOCOL_VERSION + 1 },
+  });
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+  expect(await loadErrorMessage(page)).toBe(
+    'The doola frame spoke a protocol version this loader does not support.',
+  );
+});
+
+test('a late load cannot push the report past the backstop', async ({ page }) => {
+  await freezeClock(page);
+
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await interceptFrame(page, async (route) => {
+    await held;
+    await route.fulfill({ contentType: 'text/html', body: APP_STUB });
+  });
+
+  await mount(page);
+
+  // One second of backstop left when the document finally lands. The grace is
+  // five, so an unclamped re-arm reports at 24s where the ceiling reports at 20.
+  await page.clock.fastForward(LOAD_BACKSTOP_MS - 1_000);
+  expect(await eventsOf(page, 'onLoadError')).toHaveLength(0);
+
+  release?.();
+  await appFrame(page);
+
+  // 1.5s clears the clamped deadline and not the unclamped one, which is the
+  // whole discrimination — the clock is frozen, so this margin is exact.
+  await page.clock.fastForward(1_500);
+  await expect
+    .poll(async () => (await eventsOf(page, 'onLoadError')).length, {
+      message: 'the remaining backstop is the ceiling, not the full grace',
+    })
+    .toBe(1);
+});
+
+test('a failed full-screen frame releases the overlay and the page scroll', async ({ page }) => {
+  await freezeClock(page);
+  await interceptFrame(page, (route) => route.fulfill({ status: 404, body: 'nope' }));
+  await mount(page, { viewport: NARROW });
+
+  // `auto` is the default, so every phone mounts like this: the loader promotes
+  // the frame before the navigation resolves, and a document that never arrives
+  // leaves a blank fixed sheet with the page scroll locked behind it.
+  await expect.poll(() => overlayState(page)).toEqual({ fixed: true, scrollLocked: true });
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+
+  await expect
+    .poll(() => overlayState(page), {
+      message: 'the founder must be able to scroll the partner page again',
+    })
+    .toEqual({ fixed: false, scrollLocked: false });
+  expect(await frameHeight(page)).toBe(`${PLACEHOLDER_FRAME_HEIGHT_PX}px`);
 });
 
 test('a frame that hands shake in time is never reported', async ({ page }) => {
-  await page.clock.install();
+  await freezeClock(page);
   await mount(page);
   await handshake(page);
 
@@ -353,7 +466,7 @@ test('a frame that hands shake in time is never reported', async ({ page }) => {
 });
 
 test('a ready that lands before load does not re-arm the deadline', async ({ page }) => {
-  await page.clock.install();
+  await freezeClock(page);
 
   // Production's ordering, which the harness page deliberately does not have:
   // the real app announces `ready` from a script in the document head, while
@@ -388,7 +501,7 @@ test('a ready that lands before load does not re-arm the deadline', async ({ pag
 });
 
 test('a late ready is not a retraction, and the frame still works', async ({ page }) => {
-  await page.clock.install();
+  await freezeClock(page);
   await mount(page);
   const frame = await appFrame(page);
 
@@ -401,7 +514,7 @@ test('a late ready is not a retraction, and the frame still works', async ({ pag
 });
 
 test('a frame unmounted before the deadline is never reported', async ({ page }) => {
-  await page.clock.install();
+  await freezeClock(page);
   await mount(page);
   await appFrame(page);
 

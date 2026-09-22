@@ -101,8 +101,16 @@ export class FrameController {
   private iframe: HTMLIFrameElement | null = null;
   private restoreStyles: (() => void) | null = null;
   private readyDeadline: ReturnType<typeof setTimeout> | null = null;
+  /** Absolute, so a late `load` cannot push the report past the backstop. */
+  private readyDeadlineAt = 0;
+  private frameLoaded = false;
+  /** A message from the SDK origin the parser refused — the version-skew tell. */
+  private refusedMessage = false;
   private readonly onMediaChange = () => this.applyPresentation();
-  private readonly onFrameLoad = () => this.armReadyDeadline(READY_AFTER_LOAD_MS);
+  private readonly onFrameLoad = () => {
+    this.frameLoaded = true;
+    this.armReadyDeadline(READY_AFTER_LOAD_MS);
+  };
 
   /**
    * The version settled by `ready`, which is also the first proof the frame has
@@ -133,6 +141,7 @@ export class FrameController {
     this.host.appendChild(iframe);
     if (iframe.contentWindow) register(iframe.contentWindow, this);
 
+    this.readyDeadlineAt = Date.now() + LOAD_BACKSTOP_MS;
     this.readyDeadline = setTimeout(() => this.reportNeverLoaded(), LOAD_BACKSTOP_MS);
 
     this.config.fullScreenQuery?.addEventListener('change', this.onMediaChange);
@@ -152,6 +161,8 @@ export class FrameController {
 
     // Per-frame state: a remount navigates and handshakes from scratch.
     this.protocol = null;
+    this.frameLoaded = false;
+    this.refusedMessage = false;
 
     this.config.onDisconnect(this);
   }
@@ -168,16 +179,22 @@ export class FrameController {
   }
 
   /**
-   * Shortens the outstanding deadline, and only that: a null handle means the
-   * frame has already handshaked, already been reported, or been unmounted, and
-   * `load` fires after `ready` on the healthy path — so without the guard a
-   * successful frame would re-arm its own failure timer.
+   * Brings the deadline forward, and only forward. The remaining time to the
+   * backstop is the ceiling: replacing it outright would mean a document whose
+   * `load` lands at 19s reports at 24s, so the backstop would bound nothing
+   * except the one case that cannot reach this method.
+   *
+   * A null handle means the frame has already handshaked, already been
+   * reported, or been unmounted. `load` fires after `ready` on the healthy
+   * path, so without that guard a successful frame would re-arm its own
+   * failure timer.
    */
   private armReadyDeadline(ms: number): void {
     if (this.readyDeadline === null) return;
 
     clearTimeout(this.readyDeadline);
-    this.readyDeadline = setTimeout(() => this.reportNeverLoaded(), ms);
+    const remaining = Math.max(0, this.readyDeadlineAt - Date.now());
+    this.readyDeadline = setTimeout(() => this.reportNeverLoaded(), Math.min(ms, remaining));
   }
 
   private clearReadyDeadline(): void {
@@ -194,6 +211,9 @@ export class FrameController {
    * refuses it, an extension stops it, or the app dies before it can post.
    * Everything the app can see still reaches the partner the app's way.
    *
+   * Three different failures arrive here and `message` is the only one of them
+   * a partner ever sees, so each says which it was — see `neverLoadedMessage`.
+   *
    * Reported once per mount, which the deadline handle already encodes: it is
    * non-null only between mount and whichever comes first of `ready`, this, and
    * unmount. A late `ready` is not a retraction — the partner has already
@@ -201,18 +221,37 @@ export class FrameController {
    * but it is not refused either: the handshake runs as usual, so a frame that
    * recovers still works.
    *
-   * The placeholder is left standing. Collapsing it here would move the
-   * partner's layout at a moment they did not choose; they own that box and
-   * have just been handed the reason to collapse it themselves.
+   * A full-screen frame is released first. The inline placeholder is left
+   * standing, because collapsing it would move a layout the partner chose — but
+   * the overlay is not one they chose: the loader promoted it on a narrow
+   * viewport, and leaving it would hand the founder a blank fixed sheet over
+   * the page with the scroll still locked, which only `destroy()` or removing
+   * the element would ever release.
    */
   private reportNeverLoaded(): void {
     if (this.readyDeadline === null) return;
 
     this.clearReadyDeadline();
+    this.restoreStyles?.();
     this.config.handlers.onLoadError?.({
       type: 'render_error',
-      message: 'The doola frame loaded but never started.',
+      message: this.neverLoadedMessage(),
     });
+  }
+
+  /**
+   * One sentence per cause, because this string is what reaches a support
+   * ticket. A single message for all three sent a partner to the app's boot
+   * sequence when the fault was DNS, and hid a loader/app version skew
+   * entirely — the skew the N-1 window in docs/protocol.md exists to surface.
+   */
+  private neverLoadedMessage(): string {
+    if (!this.frameLoaded) return 'The doola frame did not load.';
+
+    if (this.refusedMessage)
+      return 'The doola frame spoke a protocol version this loader does not support.';
+
+    return 'The doola frame loaded but never started.';
   }
 
   post(message: LoaderMessage): void {
@@ -240,7 +279,12 @@ export class FrameController {
     if (event.origin !== this.config.sdkOrigin) return;
 
     const message = parseAppMessage(event.data);
-    if (!message) return;
+    if (!message) {
+      // Right origin, unreadable message: the frame is alive and speaking a
+      // protocol this build refuses. Remembered so the deadline can say so.
+      this.refusedMessage = true;
+      return;
+    }
 
     switch (message.type) {
       case 'ready': {

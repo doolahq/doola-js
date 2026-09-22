@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -56,6 +56,15 @@ const APP_PAGE = `<!doctype html>
 `;
 
 export async function startHarness(): Promise<Harness> {
+  // The suite drives the built IIFE — the artifact partners load, not the
+  // sources — so `test:browser` builds first. Named here anyway, because a bare
+  // ENOENT from a fixture is a poor way to learn that.
+  if (!existsSync(BUNDLE)) {
+    throw new Error(
+      `doola: ${BUNDLE} is missing. Run \`pnpm --filter @doola/loader test:browser\`, which builds it first.`,
+    );
+  }
+
   const bundle = readFileSync(BUNDLE, 'utf8');
 
   const partner = createServer((req, res) => {

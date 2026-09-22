@@ -23,26 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+      - uses: ./.github/actions/playwright
       - run: pnpm typecheck
       - run: pnpm format:check
       - run: pnpm test
       - run: pnpm build
       - run: node scripts/check-budgets.mjs
-
-      # After the build, because the suite drives the built IIFE — the artifact
-      # partners load, not the sources. Chromium only: the suite tests this
-      # loader against postMessage and iframe rules that are specified, so a
-      # matrix would cover the browsers rather than the code.
-      #
-      # Cached on the resolved Playwright version, because the download is an
-      # order of magnitude slower than the suite it enables. No `--with-deps`:
-      # the ubuntu-latest image already carries Chromium's shared libraries,
-      # and the apt half is the slow half.
-      - id: playwright-version
-        run: echo "v=$(pnpm --filter @doola/loader exec playwright --version | tr -d ' ')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.v }}
-      - run: pnpm --filter @doola/loader exec playwright install chromium
-      - run: pnpm --filter @doola/loader test:browser

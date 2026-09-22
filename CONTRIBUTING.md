@@ -55,6 +55,38 @@ This section is the canonical definition; everything else in the repo points her
 - `pnpm typecheck` and `pnpm format:check` must pass; CI enforces both.
 - Node and pnpm versions are pinned in `package.json` (`engines` / `packageManager`) and `.nvmrc` — those are the source of truth, not this file.
 
+## Testing the loader
+
+`pnpm test` is the whole signal. It runs vitest **and** the browser suite, and
+`test:browser` builds the bundle first, so a clean clone works and no workflow
+has to remember an extra step. Keep it that way: `deploy-loader.yml` is the
+production live switch and gates on `pnpm test` alone, so splitting the browser
+suite back out means a loader can reach the edge without it ever running.
+
+Four rules the suite learned the hard way. Each one is here because a test
+passed while the bug it named was live.
+
+- **Freeze the clock, never just install it.** `page.clock.install()` keeps
+  ticking with real time, so a test that fast-forwards to just inside a deadline
+  can cross it while waiting for the browser, and then passes through the wrong
+  timer. Use `freezeClock(page)`.
+- **Assert the `message`, not just the `type`.** `render_error` covers three
+  different failures and the string is the only one a partner sees. They shared
+  one sentence for a while, which sent people to the app's boot sequence when
+  the fault was DNS, and hid a protocol skew entirely.
+- **Exercise both presentation modes.** `auto` is the default and promotes to a
+  fixed overlay under 640px, so anything touching mount, teardown or failure
+  behaves differently on a phone. Every deadline test once mounted wide, which
+  is how a failed full-screen frame came to leave the page scroll locked.
+- **Prove the test fails.** Remove the fix, run the suite, watch it go red, put
+  it back. Two of the tests in this repo were written against the wrong window
+  and passed with the code deleted.
+
+jsdom cannot host these: it does not enforce `postMessage` targetOrigin, which
+is the rule most of them are about. That is why the suite is Playwright and
+lives in `test/browser/*.browser.ts` — the extension keeps vitest's default
+include from collecting it.
+
 ## What does not live here
 
 The embedded application (served from the SDK origin) is built in
