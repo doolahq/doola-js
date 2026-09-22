@@ -135,6 +135,7 @@ export const APP_SPEC: SpecOf<AppMessage> = {
   'scroll-request': { top: { accepts: isFiniteNumber } },
   'token-request': {},
   formed: { companyId: { accepts: isNonEmptyString } },
+  'checkout-request': { companyId: { accepts: isNonEmptyString } },
   'auth-error': {
     type: { accepts: isAuthErrorType },
     message: { accepts: isString },

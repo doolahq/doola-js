@@ -28,6 +28,7 @@ export type AppMessage =
   | { type: 'scroll-request'; payload: { top: number } }
   | { type: 'token-request'; payload: Record<string, never> }
   | { type: 'formed'; payload: { companyId: string } }
+  | { type: 'checkout-request'; payload: { companyId: string } }
   | { type: 'auth-error'; payload: DoolaAuthError }
   | { type: 'load-error'; payload: DoolaLoadError }
   | { type: 'loader-start'; payload: Record<string, never> };
@@ -101,6 +102,7 @@ const PAYLOAD_SHAPE: Record<AppMessage['type'], ShapeCheck> = {
   'scroll-request': (p) => isFiniteNumber(p.top),
   'token-request': () => true,
   formed: (p) => isNonEmptyString(p.companyId),
+  'checkout-request': (p) => isNonEmptyString(p.companyId),
   'auth-error': isTaggedError(AUTH_ERROR_TYPES),
   'load-error': isTaggedError(LOAD_ERROR_TYPES),
   'loader-start': () => true,

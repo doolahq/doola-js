@@ -274,6 +274,46 @@ test('a version above the loader maximum is dropped, and is not fatal', async ({
   await expect.poll(() => countOfType(frame, 'init')).toBe(1);
 });
 
+test('checkout-request reaches the same onFormed, with the company id alone', async ({ page }) => {
+  await mount(page);
+  const frame = await handshake(page);
+
+  await sendFromApp(frame, {
+    v: 1,
+    type: 'checkout-request',
+    payload: { companyId: 'cmp_88', price: 19900, internal: 'must not leak' },
+  });
+
+  await expect
+    .poll(async () => (await partnerEvents(page)).filter((e) => e.handler === 'onFormed').length)
+    .toBe(1);
+
+  const [request] = (await partnerEvents(page)).filter((e) => e.handler === 'onFormed');
+  expect(request?.event).toEqual({ companyId: 'cmp_88' });
+});
+
+test('a malformed checkout-request is dropped, not thrown on', async ({ page }) => {
+  const errors = collectConsoleErrors(page);
+
+  await mount(page);
+  const frame = await handshake(page);
+
+  await sendFromApp(frame, { v: 1, type: 'checkout-request', payload: { companyId: '' } });
+  await sendFromApp(frame, { v: 1, type: 'checkout-request', payload: {} });
+  await page.waitForTimeout(250);
+
+  expect(await partnerEvents(page)).not.toContainEqual(
+    expect.objectContaining({ handler: 'onFormed' }),
+  );
+  expect(errors.join('\n')).toBe('');
+
+  // Still healthy: a dropped payload is not fatal to the frame.
+  await sendFromApp(frame, { v: 1, type: 'checkout-request', payload: { companyId: 'cmp_9' } });
+  await expect
+    .poll(async () => (await partnerEvents(page)).filter((e) => e.handler === 'onFormed').length)
+    .toBe(1);
+});
+
 test('formed reaches onFormed with the company id and nothing else', async ({ page }) => {
   await mount(page);
   const frame = await handshake(page);

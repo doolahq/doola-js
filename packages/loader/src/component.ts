@@ -240,10 +240,17 @@ export class FrameController {
         this.config.sessions.renewNow();
         break;
       case 'formed':
+      // The founder asking to be sent back to checkout for a company that is
+      // still unpaid. Deliberately the same destination as `formed`, not a new
+      // handler: to the partner both say "start checkout for this company",
+      // and a partner already integrated against onFormed needs no change.
+      // Which is also why onFormed can fire more than once for one company —
+      // see DoolaOptions.onFormed.
+      case 'checkout-request':
         // The projection IS the "carries ONLY the company id" rule from
-        // DoolaOptions.onFormed in the contract — formed-specific, because
-        // anything handed to partner JS can be tampered with before their
-        // checkout reads it. A future app field must not leak by accident.
+        // DoolaOptions.onFormed in the contract — because anything handed to
+        // partner JS can be tampered with before their checkout reads it. A
+        // future app field must not leak by accident.
         this.config.handlers.onFormed({ companyId: message.payload.companyId });
         break;
       case 'auth-error':
