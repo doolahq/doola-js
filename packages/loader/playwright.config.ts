@@ -6,20 +6,17 @@ import { defineConfig } from '@playwright/test';
  * a real `about:blank` -> navigated transition. jsdom enforces none of those,
  * so a jsdom test here would pass against the very bugs it is meant to catch.
  *
- * Chromium only. This is testing the loader's own wiring against browser rules
- * that are specified, not vendor behaviour, and a matrix would buy coverage of
- * postMessage and iframe navigation rather than of this code.
+ * Chromium only, which is the default: this tests the loader's own wiring
+ * against browser rules that are specified, so a matrix would buy coverage of
+ * the browsers rather than of this code.
+ *
+ * `.browser.ts`, not `.spec.ts`, so vitest's default include does not collect
+ * these files — the repo's one naming convention instead of two configs that
+ * have to agree.
  */
 export default defineConfig({
   testDir: './test/browser',
-  testMatch: /.*\.spec\.ts/,
+  testMatch: /.*\.browser\.ts$/,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: 0,
-  reporter: process.env.CI ? 'list' : 'line',
-  use: {
-    // The suite drives both sides itself, so nothing here waits on the network.
-    actionTimeout: 10_000,
-  },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
 });

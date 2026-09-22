@@ -1,36 +1,9 @@
 import type { DoolaOptions } from '@doola/js';
 
+import { LOAD_BACKSTOP_MS, PLACEHOLDER_FRAME_HEIGHT_PX, READY_AFTER_LOAD_MS } from './policy';
 import { envelope, negotiate, parseAppMessage, type LoaderMessage } from './protocol';
 import type { SessionManager } from './session';
 
-/**
- * The frame starts at a placeholder height, not at 0. The app cannot report a
- * height until it is running and connected, so anything the frame shows before
- * that — the bundle still downloading, "connecting", the auth screen a failed
- * first mint produces, and the error boundary after a crash that took the
- * app's ResizeObserver down with it — would paint into a zero-height box and
- * the founder would see nothing at all.
- *
- * The loader owns the box, so the loader owns its default. The first `resize`
- * replaces this with the real content height, usually within a frame or two of
- * mount; until then it also reserves space on the partner's page instead of
- * shifting their layout when the frame finally has something to show.
- */
-const PLACEHOLDER_FRAME_HEIGHT_PX = 160;
-
-/**
- * How long a frame may stay silent after mount before the partner is told it
- * did not come up.
- *
- * Above the app's own 30s boot buffer, deliberately and not by much. At 30s the
- * app's boot script gives up buffering and the app announces a fresh `ready`;
- * a deadline at or below that would report a failure for a frame that is about
- * to hand shake, on a slow connection, which is the one case where a partner
- * least wants to be told their embed is broken. Below a minute for the other
- * half: a dead embed that says nothing for longer has already cost the founder
- * the session.
- */
-const READY_DEADLINE_MS = 45_000;
 const INLINE_FRAME_CSS = `width:100%;border:0;display:block;height:${PLACEHOLDER_FRAME_HEIGHT_PX}px;`;
 const FULLSCREEN_FRAME_CSS =
   'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;';
@@ -128,10 +101,8 @@ export class FrameController {
   private iframe: HTMLIFrameElement | null = null;
   private restoreStyles: (() => void) | null = null;
   private readyDeadline: ReturnType<typeof setTimeout> | null = null;
-  private reportedNeverLoaded = false;
   private readonly onMediaChange = () => this.applyPresentation();
-  private readonly onFrameError = () =>
-    this.reportNeverLoaded('The doola frame could not be loaded.');
+  private readonly onFrameLoad = () => this.armReadyDeadline(READY_AFTER_LOAD_MS);
 
   /**
    * The version settled by `ready`, which is also the first proof the frame has
@@ -158,14 +129,11 @@ export class FrameController {
     iframe.style.cssText = INLINE_FRAME_CSS;
 
     this.iframe = iframe;
-    iframe.addEventListener('error', this.onFrameError);
+    iframe.addEventListener('load', this.onFrameLoad);
     this.host.appendChild(iframe);
     if (iframe.contentWindow) register(iframe.contentWindow, this);
 
-    this.readyDeadline = setTimeout(
-      () => this.reportNeverLoaded('The doola frame did not start within 45 seconds.'),
-      READY_DEADLINE_MS,
-    );
+    this.readyDeadline = setTimeout(() => this.reportNeverLoaded(), LOAD_BACKSTOP_MS);
 
     this.config.fullScreenQuery?.addEventListener('change', this.onMediaChange);
     this.applyPresentation();
@@ -178,13 +146,12 @@ export class FrameController {
     this.restoreStyles?.();
     this.clearReadyDeadline();
 
-    this.iframe?.removeEventListener('error', this.onFrameError);
+    this.iframe?.removeEventListener('load', this.onFrameLoad);
     this.iframe?.remove();
     this.iframe = null;
 
     // Per-frame state: a remount navigates and handshakes from scratch.
     this.protocol = null;
-    this.reportedNeverLoaded = false;
 
     this.config.onDisconnect(this);
   }
@@ -198,6 +165,19 @@ export class FrameController {
   dispose(): void {
     this.disconnect();
     this.host.controller = null;
+  }
+
+  /**
+   * Shortens the outstanding deadline, and only that: a null handle means the
+   * frame has already handshaked, already been reported, or been unmounted, and
+   * `load` fires after `ready` on the healthy path — so without the guard a
+   * successful frame would re-arm its own failure timer.
+   */
+  private armReadyDeadline(ms: number): void {
+    if (this.readyDeadline === null) return;
+
+    clearTimeout(this.readyDeadline);
+    this.readyDeadline = setTimeout(() => this.reportNeverLoaded(), ms);
   }
 
   private clearReadyDeadline(): void {
@@ -214,27 +194,25 @@ export class FrameController {
    * refuses it, an extension stops it, or the app dies before it can post.
    * Everything the app can see still reaches the partner the app's way.
    *
-   * Two triggers, because neither covers the other. The element's `error` event
-   * is the fast path and fires for network-level failures only: a 404 or a
-   * CSP-blocked frame still fires `load`, so the element alone cannot tell
-   * "loaded" from "loaded and dead". Only the absence of `ready` can, which is
-   * what the deadline watches.
-   *
-   * Reported once per mount. A late `ready` is not a retraction — the partner
-   * has already reacted, and a callback that un-fires is worse than one that
-   * was early — but it is not refused either: the handshake runs as usual, so a
-   * frame that recovers still works.
+   * Reported once per mount, which the deadline handle already encodes: it is
+   * non-null only between mount and whichever comes first of `ready`, this, and
+   * unmount. A late `ready` is not a retraction — the partner has already
+   * reacted, and a callback that un-fires is worse than one that was early —
+   * but it is not refused either: the handshake runs as usual, so a frame that
+   * recovers still works.
    *
    * The placeholder is left standing. Collapsing it here would move the
    * partner's layout at a moment they did not choose; they own that box and
    * have just been handed the reason to collapse it themselves.
    */
-  private reportNeverLoaded(message: string): void {
-    if (this.reportedNeverLoaded) return;
+  private reportNeverLoaded(): void {
+    if (this.readyDeadline === null) return;
 
-    this.reportedNeverLoaded = true;
     this.clearReadyDeadline();
-    this.config.handlers.onLoadError?.({ type: 'render_error', message });
+    this.config.handlers.onLoadError?.({
+      type: 'render_error',
+      message: 'The doola frame loaded but never started.',
+    });
   }
 
   post(message: LoaderMessage): void {
@@ -304,13 +282,9 @@ export class FrameController {
       case 'token-request':
         this.config.sessions.renewNow();
         break;
+      // Both mean "start checkout for this company", which is why they share a
+      // destination and why onFormed can fire twice for one — DoolaOptions.onFormed.
       case 'formed':
-      // The founder asking to be sent back to checkout for a company that is
-      // still unpaid. Deliberately the same destination as `formed`, not a new
-      // handler: to the partner both say "start checkout for this company",
-      // and a partner already integrated against onFormed needs no change.
-      // Which is also why onFormed can fire more than once for one company —
-      // see DoolaOptions.onFormed.
       case 'checkout-request':
         // The projection IS the "carries ONLY the company id" rule from
         // DoolaOptions.onFormed in the contract — because anything handed to
