@@ -28,3 +28,10 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node scripts/check-budgets.mjs
+
+      # After the build, because the suite drives the built IIFE — the artifact
+      # partners load, not the sources. Only Chromium is installed: the suite
+      # tests this loader against postMessage and iframe rules that are
+      # specified, so a browser matrix would cover the browsers, not the code.
+      - run: pnpm --filter @doola/loader exec playwright install --with-deps chromium
+      - run: pnpm --filter @doola/loader test:browser
