@@ -7,7 +7,7 @@ import {
   READY_AFTER_LOAD_MS,
 } from '../../src/policy';
 import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION } from '../../src/protocol';
-import { startHarness, type Harness } from './harness';
+import { APP_PAGE, startHarness, type Harness } from './harness';
 
 let harness: Harness;
 
@@ -43,13 +43,6 @@ interface AppWindow extends Window {
 }
 
 const ready = { v: PROTOCOL_VERSION, type: 'ready', payload: { protocolMax: PROTOCOL_VERSION } };
-
-/** The harness app page, for tests that serve the document themselves. */
-const APP_STUB = `<!doctype html><script>
-  window.__received = [];
-  addEventListener('message', (e) => window.__received.push({ origin: e.origin, data: e.data }));
-  window.__send = (m, o) => parent.postMessage(m, o || '*');
-</script>`;
 
 /**
  * Frozen, not merely faked. `clock.install()` alone keeps ticking with real
@@ -107,6 +100,13 @@ async function interceptFrame(page: Page, handler: (route: Route) => unknown): P
  * is about.
  */
 async function appFrame(page: Page): Promise<Frame> {
+  const frame = await navigatedFrame(page);
+  await frame.waitForFunction(() => Array.isArray((window as unknown as AppWindow).__received));
+
+  return frame;
+}
+
+async function navigatedFrame(page: Page): Promise<Frame> {
   const find = (): Frame | undefined =>
     page.frames().find((candidate) => candidate.url().startsWith(harness.sdkOrigin + '/'));
 
@@ -116,8 +116,22 @@ async function appFrame(page: Page): Promise<Frame> {
     })
     .toBe(true);
 
-  const frame = find() as Frame;
-  await frame.waitForFunction(() => Array.isArray((window as unknown as AppWindow).__received));
+  return find() as Frame;
+}
+
+/**
+ * Waits for the frame's `load`, which is what arms the grace. Fast-forwarding
+ * before it has fired arms nothing, leaves the 20s backstop standing, and the
+ * test reports nothing — a race that showed up as a one-in-five flake.
+ *
+ * The real-time wait is free: these tests run on a frozen clock, so no virtual
+ * deadline moves while the driver waits for the element's handler to run.
+ */
+async function loadedFrame(page: Page): Promise<Frame> {
+  const frame = await navigatedFrame(page);
+
+  await frame.waitForLoadState('load');
+  await page.waitForTimeout(50);
 
   return frame;
 }
@@ -174,6 +188,23 @@ function overlayState(page: Page): Promise<{ fixed: boolean; scrollLocked: boole
     fixed: (document.querySelector('iframe')?.style.position ?? '') === 'fixed',
     scrollLocked: document.documentElement.style.overflow === 'hidden',
   }));
+}
+
+/**
+ * The harness app page plus an in-parse announcement, which is how the real app
+ * speaks: from a script in the document head, before `load`.
+ */
+function announcesReadyDuringParse(message: unknown): string {
+  return `${APP_PAGE}<script>parent.postMessage(${JSON.stringify(message)}, '*')</script>`;
+}
+
+/** One report, and optionally which sentence it carried. */
+async function expectLoadError(page: Page, message?: string): Promise<void> {
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+
+  const [error] = await eventsOf(page, 'onLoadError');
+  expect(error?.error).toMatchObject({ type: 'render_error' });
+  if (message !== undefined) expect(await loadErrorMessage(page)).toBe(message);
 }
 
 async function loadErrorMessage(page: Page): Promise<string> {
@@ -338,7 +369,7 @@ test('a malformed checkout-request is dropped, not thrown on', async ({ page }) 
 test('a frame that loads but never says ready is reported after the grace', async ({ page }) => {
   await freezeClock(page);
   await mount(page);
-  await appFrame(page);
+  await loadedFrame(page);
 
   expect(
     await eventsOf(page, 'onLoadError'),
@@ -360,6 +391,7 @@ test('a document that 404s is reported on the same grace', async ({ page }) => {
   await freezeClock(page);
   await interceptFrame(page, (route) => route.fulfill({ status: 404, body: 'nope' }));
   await mount(page);
+  await loadedFrame(page);
 
   await page.clock.fastForward(PAST_GRACE_MS);
   await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
@@ -383,7 +415,7 @@ test('a document that never arrives is reported by the backstop', async ({ page 
 test('a refused handshake is reported as a version skew, not a boot failure', async ({ page }) => {
   await freezeClock(page);
   await mount(page);
-  const frame = await appFrame(page);
+  const frame = await loadedFrame(page);
 
   // The frame loaded, booted and spoke — at a version this loader refuses, so
   // `parseAppMessage` drops it and the deadline still expires. Reporting that
@@ -410,7 +442,7 @@ test('a late load cannot push the report past the backstop', async ({ page }) =>
   });
   await interceptFrame(page, async (route) => {
     await held;
-    await route.fulfill({ contentType: 'text/html', body: APP_STUB });
+    await route.continue();
   });
 
   await mount(page);
@@ -437,6 +469,7 @@ test('a failed full-screen frame releases the overlay and the page scroll', asyn
   await freezeClock(page);
   await interceptFrame(page, (route) => route.fulfill({ status: 404, body: 'nope' }));
   await mount(page, { viewport: NARROW });
+  await loadedFrame(page);
 
   // `auto` is the default, so every phone mounts like this: the loader promotes
   // the frame before the navigation resolves, and a document that never arrives
@@ -452,6 +485,68 @@ test('a failed full-screen frame releases the overlay and the page scroll', asyn
     })
     .toEqual({ fixed: false, scrollLocked: false });
   expect(await frameHeight(page)).toBe(`${PLACEHOLDER_FRAME_HEIGHT_PX}px`);
+});
+
+test('a malformed ready is not reported as a version skew', async ({ page }) => {
+  await freezeClock(page);
+  await mount(page);
+  const frame = await loadedFrame(page);
+
+  // Correct version, unreadable payload — a stringified protocolMax is what a
+  // serializer produces. `parseAppMessage` refuses both this and a real skew;
+  // only one of them means the peer is a build we cannot talk to.
+  await sendFromApp(frame, {
+    v: PROTOCOL_VERSION,
+    type: 'ready',
+    payload: { protocolMax: String(PROTOCOL_VERSION) },
+  });
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expectLoadError(page, 'The doola frame loaded but never started.');
+});
+
+test('a failed full-screen frame is not re-promoted by a later rotation', async ({ page }) => {
+  await freezeClock(page);
+  await interceptFrame(page, (route) => route.fulfill({ status: 404, body: 'nope' }));
+  await mount(page, { viewport: NARROW });
+  await loadedFrame(page);
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expectLoadError(page);
+  await expect.poll(() => overlayState(page)).toEqual({ fixed: false, scrollLocked: false });
+
+  // Rotate out and back. The media query matches again, and a dead frame must
+  // not take the page back — no second report could ever release it.
+  await page.setViewportSize(WIDE);
+  await page.setViewportSize(NARROW);
+  await page.waitForTimeout(250);
+
+  await expect
+    .poll(() => overlayState(page), { message: 'a reported frame stays released' })
+    .toEqual({ fixed: false, scrollLocked: false });
+});
+
+test('a frame that recovers after a report is presented as it should be', async ({ page }) => {
+  await freezeClock(page);
+  await interceptFrame(page, (route) =>
+    route.fulfill({ contentType: 'text/html', body: APP_PAGE }),
+  );
+  await mount(page, { viewport: NARROW });
+  await loadedFrame(page);
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expectLoadError(page);
+
+  const frame = await appFrame(page);
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+
+  // The late handshake is supported, so the recovered frame gets the full
+  // screen the viewport asks for — and `init` says so rather than "inline".
+  await expect.poll(() => overlayState(page)).toEqual({ fixed: true, scrollLocked: true });
+
+  const init = (await received(frame)).find((m) => m.data.type === 'init');
+  expect((init?.data.payload as { presentation?: string }).presentation).toBe('fullScreen');
 });
 
 test('a frame that hands shake in time is never reported', async ({ page }) => {
@@ -474,18 +569,7 @@ test('a ready that lands before load does not re-arm the deadline', async ({ pag
   // the guard in armReadyDeadline, that `load` re-arms the timer on a frame
   // that has already handshaked and the partner is told a healthy embed failed.
   await interceptFrame(page, (route) =>
-    route.fulfill({
-      contentType: 'text/html',
-      body: `<!doctype html><script>
-        window.__received = [];
-        addEventListener('message', (e) =>
-          window.__received.push({ origin: e.origin, data: e.data }));
-        parent.postMessage(
-          { v: ${PROTOCOL_VERSION}, type: 'ready', payload: { protocolMax: ${PROTOCOL_VERSION} } },
-          '*'
-        );
-      </script>`,
-    }),
+    route.fulfill({ contentType: 'text/html', body: announcesReadyDuringParse(ready) }),
   );
 
   await mount(page);

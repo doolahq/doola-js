@@ -108,6 +108,26 @@ const PAYLOAD_SHAPE: Record<AppMessage['type'], ShapeCheck> = {
   'loader-start': () => true,
 };
 
+/**
+ * Whether this envelope was refused for its version alone — the one parse
+ * failure that means the peer is a build we cannot talk to, rather than a
+ * message we could not read.
+ *
+ * Separate from `parseAppMessage` because that returns a bare null for seven
+ * different reasons, and only this one is a deploy skew. Telling a partner
+ * their frame "spoke a protocol version this loader does not support" when the
+ * real fault was a stringified `protocolMax` sends them to the wrong half of
+ * the system.
+ */
+export function isUnsupportedVersion(data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false;
+
+  const { v } = data as { v?: unknown };
+  if (typeof v !== 'number' || !Number.isInteger(v)) return false;
+
+  return v > PROTOCOL_VERSION || v < MIN_SUPPORTED_VERSION;
+}
+
 /** Parse an inbound message; null for anything malformed, unknown, or from a future protocol. */
 export function parseAppMessage(data: unknown): AppMessage | null {
   if (typeof data !== 'object' || data === null) return null;

@@ -1,9 +1,9 @@
 /**
- * Numbers the loader decides on its own, kept apart from the code that uses
- * them so anything without a DOM — the browser suite, tooling — can read them
- * rather than restate them. They are policy, not options: each one prevents a
- * failure that is a property of the network or the device, and none of them is
- * a partner's to tune.
+ * What the loader decides on its own, kept apart from the code that uses it so
+ * anything without a DOM — the browser suite, tooling, the docs guard — can
+ * read it rather than restate it. Policy, not options: each entry prevents a
+ * failure that is a property of the network or the device, and none of it is a
+ * partner's to tune.
  */
 
 /**
@@ -43,3 +43,25 @@ export const READY_AFTER_LOAD_MS = 5_000;
  * is not silent for a minute.
  */
 export const LOAD_BACKSTOP_MS = 20_000;
+
+/**
+ * What `onLoadError` says when the loader itself reports a frame that never
+ * started. One sentence per cause, because this string is the only part of the
+ * failure a partner ever sees and the only thing that reaches a support ticket.
+ *
+ * A single message for all three sent people to the app's boot sequence when
+ * the fault was DNS, and hid a loader/app version skew entirely — the skew the
+ * N-1 window in docs/protocol.md exists to surface.
+ *
+ * Here rather than inline so `docs/errors.md` can be checked against them:
+ * errors.md is contract surface, and a copy edit that left it behind would be
+ * invisible. See `test/errors-doc.test.ts`.
+ */
+export const LOAD_FAILURE_MESSAGES = {
+  /** The navigation never finished: DNS, TLS, a stalled connection. */
+  neverLoaded: 'The doola frame did not load.',
+  /** The document arrived — a 404 body, a CSP placeholder, a dead app — and never spoke. */
+  neverStarted: 'The doola frame loaded but never started.',
+  /** It spoke, and this build refused the version. */
+  versionRefused: 'The doola frame spoke a protocol version this loader does not support.',
+} as const;

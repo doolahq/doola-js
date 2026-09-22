@@ -58,8 +58,10 @@ This section is the canonical definition; everything else in the repo points her
 ## Testing the loader
 
 `pnpm test` is the whole signal. It runs vitest **and** the browser suite, and
-`test:browser` builds the bundle first, so a clean clone works and no workflow
-has to remember an extra step. Keep it that way: `deploy-loader.yml` is the
+`test:browser` builds the bundle first, so no workflow has to remember an extra
+step. One local prerequisite it cannot cover: the Chromium binary. Run
+`pnpm --filter @doola/loader exec playwright install chromium` once per machine —
+CI does it through `.github/actions/playwright`, cached on the resolved version. Keep it that way: `deploy-loader.yml` is the
 production live switch and gates on `pnpm test` alone, so splitting the browser
 suite back out means a loader can reach the edge without it ever running.
 

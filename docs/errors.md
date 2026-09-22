@@ -43,9 +43,14 @@ exists and the partner's page is the only place a founder can be told.
 
 The loader raises it when a frame's document has loaded but no `ready` follows
 within a few seconds, and on a longer backstop when the document never loads at
-all. The `message` says which of the three it was — the document never loaded,
-it loaded but never started, or it spoke a protocol version this loader does not
-support — so the string is worth logging rather than replacing.
+all. The `message` says which of the three it was, so it is worth logging rather
+than replacing:
+
+| message                                                                  | what happened                                                                   |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `The doola frame did not load.`                                          | the navigation never finished — DNS, TLS, a stalled connection                  |
+| `The doola frame loaded but never started.`                              | the document arrived and never spoke: a 404 body, a CSP placeholder, a dead app |
+| `The doola frame spoke a protocol version this loader does not support.` | it spoke, and this build refused the version — a deploy skew                    |
 
 An **inline** frame keeps its placeholder height, so the partner decides what
 that space becomes. A **full-screen** frame does not: on a narrow viewport
@@ -53,5 +58,11 @@ that space becomes. A **full-screen** frame does not: on a narrow viewport
 locks the page scroll _before_ the document resolves, so a failure there would
 otherwise leave the founder on a blank sheet they cannot scroll off. The loader
 releases the overlay and the scroll lock when it reports, returning the frame to
-its inline placeholder. It did not ask before promoting it, so it does not wait
-to be asked before putting it back.
+its inline placeholder, and will not promote it again — a reported frame stays
+released, because no second report could ever free it.
+
+That applies to `presentation: "fullScreen"` too, where the promotion _was_ the
+partner's choice: a blank fixed sheet the founder cannot scroll off is worse
+than a small box they can, and `onLoadError` has just told the partner to act.
+A frame that recovers on a late `ready` is promoted again if the viewport still
+asks for it, so the recovery path is unaffected.

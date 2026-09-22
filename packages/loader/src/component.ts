@@ -1,7 +1,18 @@
 import type { DoolaOptions } from '@doola/js';
 
-import { LOAD_BACKSTOP_MS, PLACEHOLDER_FRAME_HEIGHT_PX, READY_AFTER_LOAD_MS } from './policy';
-import { envelope, negotiate, parseAppMessage, type LoaderMessage } from './protocol';
+import {
+  LOAD_BACKSTOP_MS,
+  LOAD_FAILURE_MESSAGES,
+  PLACEHOLDER_FRAME_HEIGHT_PX,
+  READY_AFTER_LOAD_MS,
+} from './policy';
+import {
+  envelope,
+  isUnsupportedVersion,
+  negotiate,
+  parseAppMessage,
+  type LoaderMessage,
+} from './protocol';
 import type { SessionManager } from './session';
 
 const INLINE_FRAME_CSS = `width:100%;border:0;display:block;height:${PLACEHOLDER_FRAME_HEIGHT_PX}px;`;
@@ -104,8 +115,10 @@ export class FrameController {
   /** Absolute, so a late `load` cannot push the report past the backstop. */
   private readyDeadlineAt = 0;
   private frameLoaded = false;
-  /** A message from the SDK origin the parser refused — the version-skew tell. */
-  private refusedMessage = false;
+  /** An envelope refused for its version — the deploy-skew tell, and only that. */
+  private versionRefused = false;
+  /** Reported as failed: stops a dead frame being promoted back over the page. */
+  private failed = false;
   private readonly onMediaChange = () => this.applyPresentation();
   private readonly onFrameLoad = () => {
     this.frameLoaded = true;
@@ -162,7 +175,8 @@ export class FrameController {
     // Per-frame state: a remount navigates and handshakes from scratch.
     this.protocol = null;
     this.frameLoaded = false;
-    this.refusedMessage = false;
+    this.versionRefused = false;
+    this.failed = false;
 
     this.config.onDisconnect(this);
   }
@@ -193,7 +207,8 @@ export class FrameController {
     if (this.readyDeadline === null) return;
 
     clearTimeout(this.readyDeadline);
-    const remaining = Math.max(0, this.readyDeadlineAt - Date.now());
+    // No floor: setTimeout clamps a negative delay to zero already.
+    const remaining = this.readyDeadlineAt - Date.now();
     this.readyDeadline = setTimeout(() => this.reportNeverLoaded(), Math.min(ms, remaining));
   }
 
@@ -232,6 +247,7 @@ export class FrameController {
     if (this.readyDeadline === null) return;
 
     this.clearReadyDeadline();
+    this.failed = true;
     this.restoreStyles?.();
     this.config.handlers.onLoadError?.({
       type: 'render_error',
@@ -240,18 +256,21 @@ export class FrameController {
   }
 
   /**
-   * One sentence per cause, because this string is what reaches a support
-   * ticket. A single message for all three sent a partner to the app's boot
-   * sequence when the fault was DNS, and hid a loader/app version skew
-   * entirely — the skew the N-1 window in docs/protocol.md exists to surface.
+   * One sentence per cause; the words and the reason for them are in policy.ts.
+   *
+   * A refused message is checked first because it is the stronger fact: it
+   * proves the document ran script and reached the handshake, where `load` only
+   * proves the navigation finished. The app announces `ready` from the document
+   * head, so a frame with one stalled subresource speaks before `load` fires
+   * and may never fire it — testing `frameLoaded` first would call that one
+   * "did not load".
    */
   private neverLoadedMessage(): string {
-    if (!this.frameLoaded) return 'The doola frame did not load.';
+    if (this.versionRefused) return LOAD_FAILURE_MESSAGES.versionRefused;
 
-    if (this.refusedMessage)
-      return 'The doola frame spoke a protocol version this loader does not support.';
-
-    return 'The doola frame loaded but never started.';
+    return this.frameLoaded
+      ? LOAD_FAILURE_MESSAGES.neverStarted
+      : LOAD_FAILURE_MESSAGES.neverLoaded;
   }
 
   post(message: LoaderMessage): void {
@@ -280,9 +299,10 @@ export class FrameController {
 
     const message = parseAppMessage(event.data);
     if (!message) {
-      // Right origin, unreadable message: the frame is alive and speaking a
-      // protocol this build refuses. Remembered so the deadline can say so.
-      this.refusedMessage = true;
+      // Only a version reject is remembered. The other six ways a parse fails
+      // — a malformed payload, an unknown type — mean the frame is alive and
+      // said something we could not read, which is "never started", not skew.
+      this.versionRefused ||= isUnsupportedVersion(event.data);
       return;
     }
 
@@ -293,6 +313,14 @@ export class FrameController {
         const protocol = negotiate(message.payload.protocolMax);
         this.protocol = protocol;
         this.clearReadyDeadline();
+
+        // A `ready` after a report is a recovery, and the frame is entitled to
+        // the presentation it would have had. Restored before `init` is built,
+        // so the snapshot carries the mode the frame is actually in.
+        if (this.failed) {
+          this.failed = false;
+          this.applyPresentation();
+        }
 
         // Rejection swallowed: the partner hears via onAuthError and this
         // frame via token-error (both from the manager's failure callback).
@@ -350,6 +378,12 @@ export class FrameController {
   }
 
   private applyPresentation(): void {
+    // A frame reported as failed stays where the report left it. Without this
+    // the next matching media-query change re-promotes a dead frame to a fixed
+    // full-viewport overlay and re-locks the page — the exact state the report
+    // released, and no second report can follow it.
+    if (this.failed) return;
+
     const wantFullScreen = this.config.fullScreenQuery?.matches ?? true;
 
     if (wantFullScreen && !this.restoreStyles) {

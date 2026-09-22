@@ -42,7 +42,7 @@ const PARTNER_PAGE = `<!doctype html>
  * `ready` from a script in its head, and a harness that did the same would
  * leave no window in which to observe the handshake.
  */
-const APP_PAGE = `<!doctype html>
+export const APP_PAGE = `<!doctype html>
 <meta charset="utf-8" />
 <title>app</title>
 <script>
