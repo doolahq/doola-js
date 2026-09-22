@@ -154,6 +154,13 @@ export interface DoolaOptions {
    * JavaScript can be edited in DevTools before checkout reads it. The
    * partner's server derives what is owed from
    * GET /v1/partner/companies/{companyId}.
+   *
+   * May fire more than once for the same company, and handlers must be
+   * idempotent. Besides the submit, the founder can ask to be sent back to
+   * checkout from a waiting screen — an unpaid formation they left and came
+   * back to — and that arrives here, with the same id. Treat it as "start
+   * checkout for this company", not as "a new company exists": creating a
+   * fresh order per call would charge a returning founder twice.
    */
   onFormed: (event: { companyId: string }) => void;
 

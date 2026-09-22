@@ -1,0 +1,27 @@
+name: Playwright
+description: >-
+  Chromium for the loader's browser suite. Declared once because every workflow
+  that runs `pnpm test` now needs it — including the loader deploy, which is the
+  production live switch and previously gated on the unit tests alone. Runs
+  after ./.github/actions/setup, whose install it reads the version through.
+
+runs:
+  using: composite
+  steps:
+    # Keyed on the resolved version, because the download is an order of
+    # magnitude slower than the suite it enables. No `--with-deps`: the
+    # ubuntu-latest image already carries Chromium's shared libraries, and the
+    # apt half is the slow half.
+    - id: version
+      shell: bash
+      run: |
+        v=$(pnpm --filter @doola/loader exec playwright --version | tr -d ' ')
+        # Empty would key every run the same and silently pin a stale browser.
+        [ -n "$v" ] || { echo "could not resolve the playwright version"; exit 1; }
+        echo "v=$v" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.version.outputs.v }}
+    - shell: bash
+      run: pnpm --filter @doola/loader exec playwright install chromium

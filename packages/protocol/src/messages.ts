@@ -96,6 +96,13 @@ export type AppMessage =
   | { type: 'scroll-request'; payload: { top: number } }
   | { type: 'token-request'; payload: Record<string, never> }
   | { type: 'formed'; payload: { companyId: string } }
+  /**
+   * The founder asking to be handed back to the partner's checkout, from a
+   * waiting screen for a company that is still unpaid. Same payload as
+   * `formed` and the same destination, because to the partner it is the same
+   * request: start checkout for this company.
+   */
+  | { type: 'checkout-request'; payload: { companyId: string } }
   | { type: 'auth-error'; payload: AuthErrorPayload }
   | { type: 'load-error'; payload: LoadErrorPayload }
   | { type: 'loader-start'; payload: Record<string, never> };

@@ -20,6 +20,12 @@ const CORPUS: [string, unknown][] = [
   ['well-formed ready', { v: 1, type: 'ready', payload: { protocolMax: 1 } }],
   ['well-formed resize', { v: 1, type: 'resize', payload: { height: 640 } }],
   ['formed', { v: 1, type: 'formed', payload: { companyId: 'c_1' } }],
+  ['checkout-request', { v: 1, type: 'checkout-request', payload: { companyId: 'c_1' } }],
+  [
+    'checkout-request with an empty companyId',
+    { v: 1, type: 'checkout-request', payload: { companyId: '' } },
+  ],
+  ['checkout-request with no companyId', { v: 1, type: 'checkout-request', payload: {} }],
   ['version above the ceiling', { v: 2, type: 'ready', payload: { protocolMax: 1 } }],
   ['version below the floor', { v: 0, type: 'ready', payload: { protocolMax: 1 } }],
   ['NaN version', { v: Number.NaN, type: 'ready', payload: { protocolMax: 1 } }],

@@ -64,6 +64,7 @@ jobs:
       # two race on the same commit and `main` requires no status check — and a
       # dispatch can target any ref, so this is the last gate before a bundle
       # reaches a partner's critical path.
+      - uses: ./.github/actions/playwright
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build

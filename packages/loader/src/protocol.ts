@@ -28,6 +28,7 @@ export type AppMessage =
   | { type: 'scroll-request'; payload: { top: number } }
   | { type: 'token-request'; payload: Record<string, never> }
   | { type: 'formed'; payload: { companyId: string } }
+  | { type: 'checkout-request'; payload: { companyId: string } }
   | { type: 'auth-error'; payload: DoolaAuthError }
   | { type: 'load-error'; payload: DoolaLoadError }
   | { type: 'loader-start'; payload: Record<string, never> };
@@ -101,10 +102,31 @@ const PAYLOAD_SHAPE: Record<AppMessage['type'], ShapeCheck> = {
   'scroll-request': (p) => isFiniteNumber(p.top),
   'token-request': () => true,
   formed: (p) => isNonEmptyString(p.companyId),
+  'checkout-request': (p) => isNonEmptyString(p.companyId),
   'auth-error': isTaggedError(AUTH_ERROR_TYPES),
   'load-error': isTaggedError(LOAD_ERROR_TYPES),
   'loader-start': () => true,
 };
+
+/**
+ * Whether this envelope was refused for its version alone — the one parse
+ * failure that means the peer is a build we cannot talk to, rather than a
+ * message we could not read.
+ *
+ * Separate from `parseAppMessage` because that returns a bare null for seven
+ * different reasons, and only this one is a deploy skew. Telling a partner
+ * their frame "spoke a protocol version this loader does not support" when the
+ * real fault was a stringified `protocolMax` sends them to the wrong half of
+ * the system.
+ */
+export function isUnsupportedVersion(data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false;
+
+  const { v } = data as { v?: unknown };
+  if (typeof v !== 'number' || !Number.isInteger(v)) return false;
+
+  return v > PROTOCOL_VERSION || v < MIN_SUPPORTED_VERSION;
+}
 
 /** Parse an inbound message; null for anything malformed, unknown, or from a future protocol. */
 export function parseAppMessage(data: unknown): AppMessage | null {

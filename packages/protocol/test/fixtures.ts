@@ -13,6 +13,7 @@ export const APP_MESSAGES: { [K in AppMessage['type']]: Extract<AppMessage, { ty
   'scroll-request': { type: 'scroll-request', payload: { top: -20 } },
   'token-request': { type: 'token-request', payload: {} },
   formed: { type: 'formed', payload: { companyId: 'c_1' } },
+  'checkout-request': { type: 'checkout-request', payload: { companyId: 'c_1' } },
   'auth-error': { type: 'auth-error', payload: { type: 'mint_failed', message: 'x' } },
   'load-error': { type: 'load-error', payload: { type: 'api_error', message: 'x' } },
   'loader-start': { type: 'loader-start', payload: {} },

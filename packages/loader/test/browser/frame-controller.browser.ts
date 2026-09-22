@@ -1,0 +1,613 @@
+import type { Doola, DoolaOptions } from '@doola/js';
+import { expect, test, type Frame, type Page, type Route } from '@playwright/test';
+
+import {
+  LOAD_BACKSTOP_MS,
+  PLACEHOLDER_FRAME_HEIGHT_PX,
+  READY_AFTER_LOAD_MS,
+} from '../../src/policy';
+import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION } from '../../src/protocol';
+import { APP_PAGE, startHarness, type Harness } from './harness';
+
+let harness: Harness;
+
+test.beforeAll(async () => {
+  harness = await startHarness();
+});
+
+test.afterAll(async () => {
+  await harness.close();
+});
+
+const WIDE = { width: 1000, height: 800 };
+/** Under the loader's 640px `auto` breakpoint, so `auto` resolves to full screen. */
+const NARROW = { width: 400, height: 800 };
+
+type Wire = { origin: string; data: { v?: unknown; type?: unknown; payload?: unknown } };
+type PartnerEvent = { handler: string; event?: unknown; error?: unknown };
+
+/**
+ * The harness pages' globals. These name what the harness installs; they are
+ * not a claim that the compiler is checking the page, which it cannot do from
+ * inside `page.evaluate`.
+ */
+interface PartnerWindow extends Window {
+  __events: PartnerEvent[];
+  __instance: Doola;
+  __element: HTMLElement;
+}
+
+interface AppWindow extends Window {
+  __received: Wire[];
+  __send: (message: unknown, targetOrigin?: string) => void;
+}
+
+const ready = { v: PROTOCOL_VERSION, type: 'ready', payload: { protocolMax: PROTOCOL_VERSION } };
+
+/**
+ * Frozen, not merely faked. `clock.install()` alone keeps ticking with real
+ * time, so a test that fast-forwards to just inside a deadline can cross it on
+ * the wall clock while it waits for the browser — which is how the ceiling test
+ * below first passed against the bug it exists to catch.
+ */
+async function freezeClock(page: Page): Promise<void> {
+  const epoch = new Date('2026-01-01T00:00:00Z');
+
+  await page.clock.install({ time: epoch });
+  await page.clock.pauseAt(epoch);
+}
+
+/** Past whichever deadline is armed, driven through the clock so the suite stays in seconds. */
+const PAST_GRACE_MS = READY_AFTER_LOAD_MS + 1_000;
+const PAST_BACKSTOP_MS = LOAD_BACKSTOP_MS + 1_000;
+
+async function mount(
+  page: Page,
+  options: { viewport?: { width: number; height: number } } = {},
+): Promise<void> {
+  await page.setViewportSize(options.viewport ?? WIDE);
+  await page.goto(harness.partnerOrigin);
+
+  await page.evaluate((sdkOrigin) => {
+    const w = window as unknown as PartnerWindow;
+    w.__events = [];
+
+    const options: DoolaOptions = {
+      publishableKey: 'pk_test_harness',
+      origin: sdkOrigin,
+      fetchAccessToken: () => Promise.resolve({ accessToken: 'cs_harness', expiresIn: 3600 }),
+      onAuthError: (error) => w.__events.push({ handler: 'onAuthError', error }),
+      onFormed: (event) => w.__events.push({ handler: 'onFormed', event }),
+      onLoadError: (error) => w.__events.push({ handler: 'onLoadError', error }),
+      onLoaderStart: () => w.__events.push({ handler: 'onLoaderStart' }),
+    };
+
+    w.__instance = w.Doola!.init(options);
+    w.__element = w.__instance.create();
+    document.getElementById('mount')?.appendChild(w.__element);
+  }, harness.sdkOrigin);
+}
+
+/** Intercepts the frame document, so a test states its own failure mode. */
+async function interceptFrame(page: Page, handler: (route: Route) => unknown): Promise<void> {
+  await page.route(`${harness.sdkOrigin}/**`, handler);
+}
+
+/**
+ * The app half, once it exists. The `src` attribute is set the moment the
+ * element is created, so it proves nothing — only the frame's own URL says the
+ * navigation has happened, which is the about:blank window the `post()` gate
+ * is about.
+ */
+async function appFrame(page: Page): Promise<Frame> {
+  const frame = await navigatedFrame(page);
+  await frame.waitForFunction(() => Array.isArray((window as unknown as AppWindow).__received));
+
+  return frame;
+}
+
+async function navigatedFrame(page: Page): Promise<Frame> {
+  const find = (): Frame | undefined =>
+    page.frames().find((candidate) => candidate.url().startsWith(harness.sdkOrigin + '/'));
+
+  await expect
+    .poll(() => find() !== undefined, {
+      message: 'the app frame should navigate to the sdk origin',
+    })
+    .toBe(true);
+
+  return find() as Frame;
+}
+
+/**
+ * Waits for the frame's `load`, which is what arms the grace. Fast-forwarding
+ * before it has fired arms nothing, leaves the 20s backstop standing, and the
+ * test reports nothing — a race that showed up as a one-in-five flake.
+ *
+ * The real-time wait is free: these tests run on a frozen clock, so no virtual
+ * deadline moves while the driver waits for the element's handler to run.
+ */
+async function loadedFrame(page: Page): Promise<Frame> {
+  const frame = await navigatedFrame(page);
+
+  await frame.waitForLoadState('load');
+  await page.waitForTimeout(50);
+
+  return frame;
+}
+
+function received(frame: Frame): Promise<Wire[]> {
+  return frame.evaluate(() => (window as unknown as AppWindow).__received);
+}
+
+function sendFromApp(frame: Frame, message: unknown): Promise<void> {
+  return frame.evaluate((m) => {
+    (window as unknown as AppWindow).__send(m, '*');
+  }, message);
+}
+
+function countOfType(frame: Frame, type: string): Promise<number> {
+  return frame.evaluate(
+    (t) => (window as unknown as AppWindow).__received.filter((m) => m.data?.type === t).length,
+    type,
+  );
+}
+
+async function eventsOf(page: Page, handler: string): Promise<PartnerEvent[]> {
+  const events = await page.evaluate(() => (window as unknown as PartnerWindow).__events);
+
+  return events.filter((event) => event.handler === handler);
+}
+
+async function handshake(page: Page): Promise<Frame> {
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+
+  return frame;
+}
+
+/** The whole of what a fresh frame should have been told, and nothing carried over. */
+async function expectFreshHandshake(frame: Frame): Promise<void> {
+  const types = (await received(frame)).map((m) => m.data.type);
+
+  expect(types[0], 'init is the first thing the app ever receives').toBe('init');
+  expect(types).not.toContain('update');
+}
+
+function updateLocale(page: Page, locale: string): Promise<void> {
+  return page.evaluate((l) => {
+    (window as unknown as PartnerWindow).__instance.update({ locale: l });
+  }, locale);
+}
+
+/** What a founder is actually looking at, and whether they can scroll off it. */
+function overlayState(page: Page): Promise<{ fixed: boolean; scrollLocked: boolean }> {
+  return page.evaluate(() => ({
+    fixed: (document.querySelector('iframe')?.style.position ?? '') === 'fixed',
+    scrollLocked: document.documentElement.style.overflow === 'hidden',
+  }));
+}
+
+/**
+ * The harness app page plus an in-parse announcement, which is how the real app
+ * speaks: from a script in the document head, before `load`.
+ */
+function announcesReadyDuringParse(message: unknown): string {
+  return `${APP_PAGE}<script>parent.postMessage(${JSON.stringify(message)}, '*')</script>`;
+}
+
+/** One report, and optionally which sentence it carried. */
+async function expectLoadError(page: Page, message?: string): Promise<void> {
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+
+  const [error] = await eventsOf(page, 'onLoadError');
+  expect(error?.error).toMatchObject({ type: 'render_error' });
+  if (message !== undefined) expect(await loadErrorMessage(page)).toBe(message);
+}
+
+async function loadErrorMessage(page: Page): Promise<string> {
+  const [error] = await eventsOf(page, 'onLoadError');
+
+  return (error?.error as { message?: string } | undefined)?.message ?? '';
+}
+
+function frameHeight(page: Page): Promise<string> {
+  return page.evaluate(() => document.querySelector('iframe')?.style.height ?? '');
+}
+
+test('posts nothing before ready, even once the frame could receive it', async ({ page }) => {
+  await mount(page);
+
+  // The window that matters, and the only one that can prove the gate: the
+  // frame has navigated and is listening, so the browser would deliver a post
+  // — but `ready` has not arrived, so there is no negotiated version to stamp.
+  // On about:blank the browser refuses the send whether the gate is there or
+  // not, so that window proves nothing.
+  const frame = await appFrame(page);
+  await updateLocale(page, 'fr');
+  await page.waitForTimeout(250);
+
+  expect(await received(frame), 'nothing reaches the app before it says ready').toHaveLength(0);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+  await expectFreshHandshake(frame);
+});
+
+test('init carries the negotiated protocol and the presentation mode', async ({ page }) => {
+  await mount(page);
+  const frame = await handshake(page);
+
+  const init = (await received(frame)).find((m) => m.data.type === 'init');
+  const payload = init?.data.payload as Record<string, unknown>;
+
+  expect(init?.data.v).toBe(PROTOCOL_VERSION);
+  expect(payload.protocol).toBe(PROTOCOL_VERSION);
+  expect(payload.presentation).toBe('inline');
+  expect((payload.session as Record<string, unknown>).accessToken).toBe('cs_harness');
+});
+
+test('a viewport crossing the breakpoint sends the presentation transition', async ({ page }) => {
+  await mount(page, { viewport: WIDE });
+  const frame = await handshake(page);
+
+  await page.setViewportSize(NARROW);
+  await expect.poll(() => countOfType(frame, 'presentation')).toBe(1);
+
+  await page.setViewportSize(WIDE);
+  await expect.poll(() => countOfType(frame, 'presentation')).toBe(2);
+
+  const modes = (await received(frame))
+    .filter((m) => m.data.type === 'presentation')
+    .map((m) => (m.data.payload as { mode: string }).mode);
+  expect(modes).toEqual(['fullScreen', 'inline']);
+});
+
+test('a height negotiated inline survives a full-screen round trip', async ({ page }) => {
+  await mount(page, { viewport: WIDE });
+  const frame = await handshake(page);
+
+  await sendFromApp(frame, { v: PROTOCOL_VERSION, type: 'resize', payload: { height: 512 } });
+  await expect.poll(() => frameHeight(page)).toBe('512px');
+
+  await page.setViewportSize(NARROW);
+  await expect.poll(() => frameHeight(page)).toBe('100%');
+
+  await page.setViewportSize(WIDE);
+  await expect
+    .poll(() => frameHeight(page), { message: 'the inline height is restored, not rebuilt' })
+    .toBe('512px');
+});
+
+test('a frame mounted under the breakpoint returns to the placeholder, not to zero', async ({
+  page,
+}) => {
+  // It goes full screen before the app has negotiated anything, so the height
+  // it captures is the placeholder. Asserted rather than left to be "fixed":
+  // the last full-screen height was measured against the wrong viewport, and
+  // the loader never knew an inline one. See applyPresentation.
+  await mount(page, { viewport: NARROW });
+  await handshake(page);
+  await expect.poll(() => frameHeight(page)).toBe('100%');
+
+  await page.setViewportSize(WIDE);
+  await expect.poll(() => frameHeight(page)).toBe(`${PLACEHOLDER_FRAME_HEIGHT_PX}px`);
+});
+
+test('a remount handshakes from scratch and posts nothing to the fresh frame', async ({ page }) => {
+  await mount(page);
+  await handshake(page);
+
+  await page.evaluate(() => {
+    (window as unknown as PartnerWindow).__element.remove();
+  });
+  await updateLocale(page, 'de');
+  await page.evaluate(() => {
+    document.getElementById('mount')?.appendChild((window as unknown as PartnerWindow).__element);
+  });
+
+  await expectFreshHandshake(await handshake(page));
+});
+
+test('a version outside the supported window is dropped, and is not fatal', async ({ page }) => {
+  await mount(page);
+  const frame = await appFrame(page);
+
+  for (const v of [PROTOCOL_VERSION + 1, MIN_SUPPORTED_VERSION - 1]) {
+    await sendFromApp(frame, { v, type: 'ready', payload: { protocolMax: PROTOCOL_VERSION } });
+  }
+  await page.waitForTimeout(250);
+  expect(await received(frame)).toHaveLength(0);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+});
+
+// One body, both labels: that these two land in the same place with the same
+// projection is the whole of PENG-6682, so the loop is the assertion.
+for (const type of ['formed', 'checkout-request'] as const) {
+  test(`${type} reaches onFormed with the company id and nothing else`, async ({ page }) => {
+    await mount(page);
+    const frame = await handshake(page);
+
+    await sendFromApp(frame, {
+      v: PROTOCOL_VERSION,
+      type,
+      payload: { companyId: 'cmp_88', amountDue: 4200, internal: 'must not leak' },
+    });
+
+    await expect.poll(async () => (await eventsOf(page, 'onFormed')).length).toBe(1);
+    expect((await eventsOf(page, 'onFormed'))[0]?.event).toEqual({ companyId: 'cmp_88' });
+  });
+}
+
+test('a malformed checkout-request is dropped, not thrown on', async ({ page }) => {
+  await mount(page);
+  const frame = await handshake(page);
+
+  await sendFromApp(frame, {
+    v: PROTOCOL_VERSION,
+    type: 'checkout-request',
+    payload: { companyId: '' },
+  });
+  await sendFromApp(frame, { v: PROTOCOL_VERSION, type: 'checkout-request', payload: {} });
+  await page.waitForTimeout(250);
+
+  expect(await eventsOf(page, 'onFormed')).toHaveLength(0);
+
+  // Still healthy: a dropped payload is not fatal to the frame.
+  await sendFromApp(frame, {
+    v: PROTOCOL_VERSION,
+    type: 'checkout-request',
+    payload: { companyId: 'cmp_9' },
+  });
+  await expect.poll(async () => (await eventsOf(page, 'onFormed')).length).toBe(1);
+});
+
+test('a frame that loads but never says ready is reported after the grace', async ({ page }) => {
+  await freezeClock(page);
+  await mount(page);
+  await loadedFrame(page);
+
+  expect(
+    await eventsOf(page, 'onLoadError'),
+    'nothing is reported while it may still start',
+  ).toHaveLength(0);
+
+  // The short grace, not the backstop: `load` has fired, so the loader knows
+  // the document arrived and only the handshake is missing.
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+  expect((await eventsOf(page, 'onLoadError'))[0]?.error).toMatchObject({ type: 'render_error' });
+
+  // Asserted, because this string is the only thing that reaches a support
+  // ticket and all three causes used to share one sentence.
+  expect(await loadErrorMessage(page)).toBe('The doola frame loaded but never started.');
+});
+
+test('a document that 404s is reported on the same grace', async ({ page }) => {
+  await freezeClock(page);
+  await interceptFrame(page, (route) => route.fulfill({ status: 404, body: 'nope' }));
+  await mount(page);
+  await loadedFrame(page);
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+});
+
+test('a document that never arrives is reported by the backstop', async ({ page }) => {
+  await freezeClock(page);
+  // Never fulfilled, so `load` never fires and the grace is never armed.
+  await interceptFrame(page, () => {});
+  await mount(page);
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await page.waitForTimeout(250);
+  expect(await eventsOf(page, 'onLoadError'), 'the grace cannot have been armed').toHaveLength(0);
+
+  await page.clock.fastForward(PAST_BACKSTOP_MS);
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+  expect(await loadErrorMessage(page)).toBe('The doola frame did not load.');
+});
+
+test('a refused handshake is reported as a version skew, not a boot failure', async ({ page }) => {
+  await freezeClock(page);
+  await mount(page);
+  const frame = await loadedFrame(page);
+
+  // The frame loaded, booted and spoke — at a version this loader refuses, so
+  // `parseAppMessage` drops it and the deadline still expires. Reporting that
+  // as "never started" hides exactly the skew the N-1 window exists to surface.
+  await sendFromApp(frame, {
+    v: PROTOCOL_VERSION + 1,
+    type: 'ready',
+    payload: { protocolMax: PROTOCOL_VERSION + 1 },
+  });
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+  expect(await loadErrorMessage(page)).toBe(
+    'The doola frame spoke a protocol version this loader does not support.',
+  );
+});
+
+test('a late load cannot push the report past the backstop', async ({ page }) => {
+  await freezeClock(page);
+
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await interceptFrame(page, async (route) => {
+    await held;
+    await route.continue();
+  });
+
+  await mount(page);
+
+  // One second of backstop left when the document finally lands. The grace is
+  // five, so an unclamped re-arm reports at 24s where the ceiling reports at 20.
+  await page.clock.fastForward(LOAD_BACKSTOP_MS - 1_000);
+  expect(await eventsOf(page, 'onLoadError')).toHaveLength(0);
+
+  release?.();
+  await appFrame(page);
+
+  // 1.5s clears the clamped deadline and not the unclamped one, which is the
+  // whole discrimination — the clock is frozen, so this margin is exact.
+  await page.clock.fastForward(1_500);
+  await expect
+    .poll(async () => (await eventsOf(page, 'onLoadError')).length, {
+      message: 'the remaining backstop is the ceiling, not the full grace',
+    })
+    .toBe(1);
+});
+
+test('a failed full-screen frame releases the overlay and the page scroll', async ({ page }) => {
+  await freezeClock(page);
+  await interceptFrame(page, (route) => route.fulfill({ status: 404, body: 'nope' }));
+  await mount(page, { viewport: NARROW });
+  await loadedFrame(page);
+
+  // `auto` is the default, so every phone mounts like this: the loader promotes
+  // the frame before the navigation resolves, and a document that never arrives
+  // leaves a blank fixed sheet with the page scroll locked behind it.
+  await expect.poll(() => overlayState(page)).toEqual({ fixed: true, scrollLocked: true });
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+
+  await expect
+    .poll(() => overlayState(page), {
+      message: 'the founder must be able to scroll the partner page again',
+    })
+    .toEqual({ fixed: false, scrollLocked: false });
+  expect(await frameHeight(page)).toBe(`${PLACEHOLDER_FRAME_HEIGHT_PX}px`);
+});
+
+test('a malformed ready is not reported as a version skew', async ({ page }) => {
+  await freezeClock(page);
+  await mount(page);
+  const frame = await loadedFrame(page);
+
+  // Correct version, unreadable payload — a stringified protocolMax is what a
+  // serializer produces. `parseAppMessage` refuses both this and a real skew;
+  // only one of them means the peer is a build we cannot talk to.
+  await sendFromApp(frame, {
+    v: PROTOCOL_VERSION,
+    type: 'ready',
+    payload: { protocolMax: String(PROTOCOL_VERSION) },
+  });
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expectLoadError(page, 'The doola frame loaded but never started.');
+});
+
+test('a failed full-screen frame is not re-promoted by a later rotation', async ({ page }) => {
+  await freezeClock(page);
+  await interceptFrame(page, (route) => route.fulfill({ status: 404, body: 'nope' }));
+  await mount(page, { viewport: NARROW });
+  await loadedFrame(page);
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expectLoadError(page);
+  await expect.poll(() => overlayState(page)).toEqual({ fixed: false, scrollLocked: false });
+
+  // Rotate out and back. The media query matches again, and a dead frame must
+  // not take the page back — no second report could ever release it.
+  await page.setViewportSize(WIDE);
+  await page.setViewportSize(NARROW);
+  await page.waitForTimeout(250);
+
+  await expect
+    .poll(() => overlayState(page), { message: 'a reported frame stays released' })
+    .toEqual({ fixed: false, scrollLocked: false });
+});
+
+test('a frame that recovers after a report is presented as it should be', async ({ page }) => {
+  await freezeClock(page);
+  await interceptFrame(page, (route) =>
+    route.fulfill({ contentType: 'text/html', body: APP_PAGE }),
+  );
+  await mount(page, { viewport: NARROW });
+  await loadedFrame(page);
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expectLoadError(page);
+
+  const frame = await appFrame(page);
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+
+  // The late handshake is supported, so the recovered frame gets the full
+  // screen the viewport asks for — and `init` says so rather than "inline".
+  await expect.poll(() => overlayState(page)).toEqual({ fixed: true, scrollLocked: true });
+
+  const init = (await received(frame)).find((m) => m.data.type === 'init');
+  expect((init?.data.payload as { presentation?: string }).presentation).toBe('fullScreen');
+});
+
+test('a frame that hands shake in time is never reported', async ({ page }) => {
+  await freezeClock(page);
+  await mount(page);
+  await handshake(page);
+
+  await page.clock.fastForward(PAST_BACKSTOP_MS);
+  await page.waitForTimeout(250);
+
+  expect(await eventsOf(page, 'onLoadError')).toHaveLength(0);
+});
+
+test('a ready that lands before load does not re-arm the deadline', async ({ page }) => {
+  await freezeClock(page);
+
+  // Production's ordering, which the harness page deliberately does not have:
+  // the real app announces `ready` from a script in the document head, while
+  // the document parses, so it lands *before* the frame's `load` event. Without
+  // the guard in armReadyDeadline, that `load` re-arms the timer on a frame
+  // that has already handshaked and the partner is told a healthy embed failed.
+  await interceptFrame(page, (route) =>
+    route.fulfill({ contentType: 'text/html', body: announcesReadyDuringParse(ready) }),
+  );
+
+  await mount(page);
+  const frame = await appFrame(page);
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+
+  await page.clock.fastForward(PAST_BACKSTOP_MS);
+  await page.waitForTimeout(250);
+
+  expect(await eventsOf(page, 'onLoadError'), 'a handshaked frame is never reported').toHaveLength(
+    0,
+  );
+});
+
+test('a late ready is not a retraction, and the frame still works', async ({ page }) => {
+  await freezeClock(page);
+  await mount(page);
+  const frame = await appFrame(page);
+
+  await page.clock.fastForward(PAST_GRACE_MS);
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(1);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+  expect(await eventsOf(page, 'onLoadError'), 'the callback does not un-fire').toHaveLength(1);
+});
+
+test('a frame unmounted before the deadline is never reported', async ({ page }) => {
+  await freezeClock(page);
+  await mount(page);
+  await appFrame(page);
+
+  await page.evaluate(() => {
+    (window as unknown as PartnerWindow).__element.remove();
+  });
+
+  await page.clock.fastForward(PAST_BACKSTOP_MS);
+  await page.waitForTimeout(250);
+
+  expect(await eventsOf(page, 'onLoadError')).toHaveLength(0);
+});
