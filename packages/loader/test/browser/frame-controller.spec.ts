@@ -1,7 +1,7 @@
 import type { Doola, DoolaOptions } from '@doola/js';
 import { expect, test, type ConsoleMessage, type Frame, type Page } from '@playwright/test';
 
-import { slowKey, startHarness, type Harness } from './harness';
+import { NEVER_LOADS_KEY, slowKey, startHarness, type Harness } from './harness';
 
 let harness: Harness;
 
@@ -312,6 +312,81 @@ test('a malformed checkout-request is dropped, not thrown on', async ({ page }) 
   await expect
     .poll(async () => (await partnerEvents(page)).filter((e) => e.handler === 'onFormed').length)
     .toBe(1);
+});
+
+/**
+ * Past the loader's 45s deadline. Driven through Playwright's clock rather
+ * than waited out, so the suite stays in seconds.
+ */
+const PAST_DEADLINE_MS = 46_000;
+
+function loadErrors(page: Page): Promise<PartnerEvent[]> {
+  return page
+    .evaluate(() => (window as unknown as PartnerWindow).__events)
+    .then((events) => events.filter((e) => e.handler === 'onLoadError'));
+}
+
+test('a frame that never says ready is reported to the partner', async ({ page }) => {
+  await page.clock.install();
+  await mount(page);
+  await appFrame(page);
+
+  expect(await loadErrors(page), 'nothing is reported before the deadline').toHaveLength(0);
+
+  await page.clock.fastForward(PAST_DEADLINE_MS);
+  await expect.poll(async () => (await loadErrors(page)).length).toBe(1);
+
+  const [error] = await loadErrors(page);
+  expect(error?.error).toMatchObject({ type: 'render_error' });
+});
+
+test('a frame whose document 404s is reported too', async ({ page }) => {
+  await page.clock.install();
+  await mount(page, { key: NEVER_LOADS_KEY });
+
+  await page.clock.fastForward(PAST_DEADLINE_MS);
+  await expect.poll(async () => (await loadErrors(page)).length).toBe(1);
+  expect((await loadErrors(page))[0]?.error).toMatchObject({ type: 'render_error' });
+});
+
+test('a frame that hands shake in time is never reported', async ({ page }) => {
+  await page.clock.install();
+  await mount(page);
+  await handshake(page);
+
+  await page.clock.fastForward(PAST_DEADLINE_MS);
+  await page.waitForTimeout(250);
+
+  expect(await loadErrors(page)).toHaveLength(0);
+});
+
+test('a late ready is not a retraction, and the frame still works', async ({ page }) => {
+  await page.clock.install();
+  await mount(page);
+  const frame = await appFrame(page);
+
+  await page.clock.fastForward(PAST_DEADLINE_MS);
+  await expect.poll(async () => (await loadErrors(page)).length).toBe(1);
+
+  // The frame recovers: the handshake runs as usual, and the error stands.
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+  expect(await loadErrors(page), 'the callback does not un-fire').toHaveLength(1);
+});
+
+test('a frame unmounted before the deadline is never reported', async ({ page }) => {
+  await page.clock.install();
+  await mount(page);
+  await appFrame(page);
+
+  await page.evaluate(() => {
+    (window as unknown as PartnerWindow).__element.remove();
+  });
+
+  await page.clock.fastForward(PAST_DEADLINE_MS);
+  await page.waitForTimeout(250);
+
+  expect(await loadErrors(page)).toHaveLength(0);
 });
 
 test('formed reaches onFormed with the company id and nothing else', async ({ page }) => {

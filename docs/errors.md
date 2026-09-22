@@ -21,15 +21,23 @@ contract wins and this file has the bug.
 
 ## Load errors → `onLoadError`
 
-| type                    | meaning                                                                            |
-| ----------------------- | ---------------------------------------------------------------------------------- |
-| `api_connection_error`  | Could not reach doola.                                                             |
-| `authentication_error`  | Session rejected by the API (expired mid-flight and backstop renewal also failed). |
-| `invalid_request_error` | 4xx caused by integration configuration; not retryable.                            |
-| `render_error`          | The component could not render — commonly browser extensions or CSP.               |
-| `api_error`             | Everything else, including doola 5xx.                                              |
+| type                    | meaning                                                                                                                                                                                                                                                                |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api_connection_error`  | Could not reach doola.                                                                                                                                                                                                                                                 |
+| `authentication_error`  | Session rejected by the API (expired mid-flight and backstop renewal also failed).                                                                                                                                                                                     |
+| `invalid_request_error` | 4xx caused by integration configuration; not retryable.                                                                                                                                                                                                                |
+| `render_error`          | The component could not render, or never started at all — a 404, a `frame-src` CSP that refuses the frame, a browser extension, or an app that died before it could speak. The loader raises this one itself when no frame reports `ready` within 45 seconds of mount. |
+| `api_error`             | Everything else, including doola 5xx.                                                                                                                                                                                                                                  |
 
 Both handlers may be called more than once per incident and must be idempotent
 (`onAuthError` in the contract says when it fires). In most cases the component
 renders its own error UI; `onLoadError` exists for the partner's analytics and for
 anything on _their_ page that depends on the frame.
+
+The one exception is a frame that never starts. Every other error is reported by
+the app, which means the app is running and showing something. When the document
+never loads there is nothing inside the frame to render anything, so the
+`render_error` the loader raises is the only signal that exists — the partner's
+page is the only place a founder can be told. The loader leaves the frame's
+placeholder height in place rather than collapsing it, so the partner decides
+what that space becomes.

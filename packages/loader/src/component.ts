@@ -17,6 +17,20 @@ import type { SessionManager } from './session';
  * shifting their layout when the frame finally has something to show.
  */
 const PLACEHOLDER_FRAME_HEIGHT_PX = 160;
+
+/**
+ * How long a frame may stay silent after mount before the partner is told it
+ * did not come up.
+ *
+ * Above the app's own 30s boot buffer, deliberately and not by much. At 30s the
+ * app's boot script gives up buffering and the app announces a fresh `ready`;
+ * a deadline at or below that would report a failure for a frame that is about
+ * to hand shake, on a slow connection, which is the one case where a partner
+ * least wants to be told their embed is broken. Below a minute for the other
+ * half: a dead embed that says nothing for longer has already cost the founder
+ * the session.
+ */
+const READY_DEADLINE_MS = 45_000;
 const INLINE_FRAME_CSS = `width:100%;border:0;display:block;height:${PLACEHOLDER_FRAME_HEIGHT_PX}px;`;
 const FULLSCREEN_FRAME_CSS =
   'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;';
@@ -113,7 +127,11 @@ function deregister(source: MessageEventSource | null): void {
 export class FrameController {
   private iframe: HTMLIFrameElement | null = null;
   private restoreStyles: (() => void) | null = null;
+  private readyDeadline: ReturnType<typeof setTimeout> | null = null;
+  private reportedNeverLoaded = false;
   private readonly onMediaChange = () => this.applyPresentation();
+  private readonly onFrameError = () =>
+    this.reportNeverLoaded('The doola frame could not be loaded.');
 
   /**
    * The version settled by `ready`, which is also the first proof the frame has
@@ -140,8 +158,14 @@ export class FrameController {
     iframe.style.cssText = INLINE_FRAME_CSS;
 
     this.iframe = iframe;
+    iframe.addEventListener('error', this.onFrameError);
     this.host.appendChild(iframe);
     if (iframe.contentWindow) register(iframe.contentWindow, this);
+
+    this.readyDeadline = setTimeout(
+      () => this.reportNeverLoaded('The doola frame did not start within 45 seconds.'),
+      READY_DEADLINE_MS,
+    );
 
     this.config.fullScreenQuery?.addEventListener('change', this.onMediaChange);
     this.applyPresentation();
@@ -152,12 +176,15 @@ export class FrameController {
     deregister(this.iframe?.contentWindow ?? null);
     this.config.fullScreenQuery?.removeEventListener('change', this.onMediaChange);
     this.restoreStyles?.();
+    this.clearReadyDeadline();
 
+    this.iframe?.removeEventListener('error', this.onFrameError);
     this.iframe?.remove();
     this.iframe = null;
 
     // Per-frame state: a remount navigates and handshakes from scratch.
     this.protocol = null;
+    this.reportedNeverLoaded = false;
 
     this.config.onDisconnect(this);
   }
@@ -171,6 +198,43 @@ export class FrameController {
   dispose(): void {
     this.disconnect();
     this.host.controller = null;
+  }
+
+  private clearReadyDeadline(): void {
+    if (this.readyDeadline === null) return;
+
+    clearTimeout(this.readyDeadline);
+    this.readyDeadline = null;
+  }
+
+  /**
+   * The one failure in the flow neither side could report. `onLoadError` needs
+   * a `load-error` message, which needs the app to be running — precisely what
+   * has not happened when the document 404s, the partner's CSP `frame-src`
+   * refuses it, an extension stops it, or the app dies before it can post.
+   * Everything the app can see still reaches the partner the app's way.
+   *
+   * Two triggers, because neither covers the other. The element's `error` event
+   * is the fast path and fires for network-level failures only: a 404 or a
+   * CSP-blocked frame still fires `load`, so the element alone cannot tell
+   * "loaded" from "loaded and dead". Only the absence of `ready` can, which is
+   * what the deadline watches.
+   *
+   * Reported once per mount. A late `ready` is not a retraction — the partner
+   * has already reacted, and a callback that un-fires is worse than one that
+   * was early — but it is not refused either: the handshake runs as usual, so a
+   * frame that recovers still works.
+   *
+   * The placeholder is left standing. Collapsing it here would move the
+   * partner's layout at a moment they did not choose; they own that box and
+   * have just been handed the reason to collapse it themselves.
+   */
+  private reportNeverLoaded(message: string): void {
+    if (this.reportedNeverLoaded) return;
+
+    this.reportedNeverLoaded = true;
+    this.clearReadyDeadline();
+    this.config.handlers.onLoadError?.({ type: 'render_error', message });
   }
 
   post(message: LoaderMessage): void {
@@ -206,6 +270,7 @@ export class FrameController {
         // every outbound `v` from here on is the version it settles.
         const protocol = negotiate(message.payload.protocolMax);
         this.protocol = protocol;
+        this.clearReadyDeadline();
 
         // Rejection swallowed: the partner hears via onAuthError and this
         // frame via token-error (both from the manager's failure callback).
