@@ -35,14 +35,17 @@ Neither package exists on npm yet, so the first release needs these once:
    publish. This is the only credential the release needs that the release App
    cannot provide — publishing to npm is not something a GitHub App can do.
 
-   Where it sits is still open. Every other credential here reaches CI through
+   Where it sits is still open. Every AWS credential here reaches CI through
    OIDC into an Environment pinned to `main`, and production adds a named
    reviewer; this one is repository-scoped, so any workflow run on any branch
    can read it, and the release job declares no `environment:`, so publishing
-   needs no approval. That is backwards: a bad loader deploy expires from the
-   edge in minutes, a bad publish is permanent in every lockfile. Moving the
-   secret onto an Environment and gating the publish closes both halves, and
-   npm Trusted Publishing removes the token altogether (PENG-6617).
+   needs no approval. The release App's two org secrets are ungated the same
+   way, but they only mint a GitHub token scoped to this repository — this is
+   the credential that reaches npm. That is backwards: a bad loader deploy
+   expires from the edge in minutes, a bad publish is permanent in every
+   lockfile. Moving the secret onto an Environment and gating the publish closes
+   both halves, and npm Trusted Publishing removes the token altogether
+   (PENG-6617).
 
 2. **The `doola-semantic-release` App with access to this repository**, and its
    two org secrets (`SEMANTIC_RELEASE_APP_ID`, `SEMANTIC_RELEASE_APP_PRIVATE_KEY`)
@@ -92,12 +95,15 @@ The IAM roles exist (PENG-6611), both GitHub Environments exist, and the
 variables below are set on each. Nothing here is outstanding; they are written
 down because a wrong value is how this breaks.
 
-| Variable                 | `development`                                               | `production`                    |
-| ------------------------ | ----------------------------------------------------------- | ------------------------------- |
-| `AWS_DEPLOY_ROLE_ARN`    | that account's `github_ci_doola_sdk_loader_role_arn` output |
-| `LOADER_BUCKET`          | `development-doola-sdk-loader`                              | `production-doola-sdk-loader`   |
-| `LOADER_DISTRIBUTION_ID` | the distribution fronting `js.test.doola.com`               | the one fronting `js.doola.com` |
-| `LOADER_HOSTNAME`        | `js.test.doola.com`                                         | `js.doola.com`                  |
+| Variable                 | `development`                                               | `production`                                                |
+| ------------------------ | ----------------------------------------------------------- | ----------------------------------------------------------- |
+| `AWS_DEPLOY_ROLE_ARN`    | `arn:aws:iam::394540956281:role/github-ci-doola-sdk-loader` | `arn:aws:iam::576249115295:role/github-ci-doola-sdk-loader` |
+| `LOADER_BUCKET`          | `development-doola-sdk-loader`                              | `production-doola-sdk-loader`                               |
+| `LOADER_DISTRIBUTION_ID` | the distribution fronting `js.test.doola.com`               | the one fronting `js.doola.com`                             |
+| `LOADER_HOSTNAME`        | `js.test.doola.com`                                         | `js.doola.com`                                              |
+
+Both roles carry the same name; the account id is the whole difference, since
+`development` and `production` are separate AWS accounts.
 
 The distribution id is configured rather than looked up because the deploy role
 grants `CreateInvalidation` and `GetInvalidation` on one distribution ARN and no
