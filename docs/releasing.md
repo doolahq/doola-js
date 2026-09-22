@@ -47,10 +47,15 @@ Neither package exists on npm yet, so the first release needs these once:
    ungated the same way, but they only mint a GitHub token scoped to this
    repository — this is the credential that reaches npm.
 
-   `NPM_TOKEN` is set on the `production` Environment (2026-09-22). Delete the
-   repository-level copy once this workflow is the one in `main`: a repository
-   secret is readable by any workflow run on any branch, and nothing reads it
-   after the `publish` job owns the publish.
+   `NPM_TOKEN` is set on the `production` Environment (2026-09-22). **Deleting
+   the repository-level copy is the step that does the security work, and
+   nothing here will tell you if it is skipped.** An Environment secret shadows
+   a repository one, it does not replace it: a job declaring
+   `environment: production` still falls through to the repository, and then to
+   the organization, for any name the Environment does not hold. So the publish
+   succeeds either way, and while the repository copy exists the token stays
+   readable by any workflow run on any branch — which is the whole problem this
+   section opens with.
 
    **The token expires on 2026-12-16.** Nothing warns first — a release after
    that date fails at the publish step, with the version pull request already
