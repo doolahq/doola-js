@@ -47,10 +47,14 @@ Neither package exists on npm yet, so the first release needs these once:
    ungated the same way, but they only mint a GitHub token scoped to this
    repository — this is the credential that reaches npm.
 
-   `NPM_TOKEN` is a repository secret as of 2026-09-22. Add it to the
-   `production` Environment and delete the repository copy, in that order: an
-   Environment secret shadows the repository one, so the gap closes before it
-   opens.
+   `NPM_TOKEN` is set on the `production` Environment (2026-09-22). Delete the
+   repository-level copy once this workflow is the one in `main`: a repository
+   secret is readable by any workflow run on any branch, and nothing reads it
+   after the `publish` job owns the publish.
+
+   **The token expires on 2026-12-16.** Nothing warns first — a release after
+   that date fails at the publish step, with the version pull request already
+   merged. That is the deadline on Trusted Publishing below, not a soft target.
 
    npm Trusted Publishing removes the token altogether and is the end state
    (PENG-6617); this is the shape to hold until the first publish makes that
