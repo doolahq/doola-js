@@ -20,6 +20,9 @@ updates:
 
   # Every dependency here is a dev dependency: both published packages ship
   # with none. Majors arrive on their own so each gets its own review.
+  #
+  # "/" alone covers every package in pnpm-workspace.yaml. Adding the package
+  # directories would split updates away from the one root pnpm-lock.yaml.
   - package-ecosystem: npm
     directory: '/'
     schedule:
