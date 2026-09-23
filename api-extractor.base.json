@@ -14,10 +14,8 @@
       // exported here is public, so a missing tag says nothing.
       "ae-missing-release-tag": { "logLevel": "none" }
     },
-    // The report carries no doc comments, so TSDoc syntax cannot change it, and
-    // the JSDoc here is prose for editors, with `{companyId}` paths and `->`
-    // arrows TSDoc reads as malformed tags. A broken {@link} target is
-    // ae-unresolved-link, an extractor message, so it still fails.
+    // Our JSDoc is prose (`{companyId}` paths, `->` arrows) that TSDoc reads as
+    // malformed tags, and the report carries no doc comments to protect.
     "tsdocMessageReporting": {
       "default": { "logLevel": "none" }
     }
