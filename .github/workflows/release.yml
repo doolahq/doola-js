@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
+      hasChangesets: ${{ steps.changesets.outputs.has-changesets }}
       unpublished: ${{ steps.registry.outputs.unpublished }}
     steps:
       # The App rather than GITHUB_TOKEN, and not only for the shared identity:
@@ -99,15 +99,14 @@ jobs:
 
           echo "unpublished=$unpublished" >> "$GITHUB_OUTPUT"
 
-      # No `publish` input and no npm credential: this job only ever runs
+      # No `publish-script` and no npm credential: this job only ever runs
       # `changeset version`. Publishing is the job below.
-      - uses: changesets/action@v1
+      - uses: changesets/action@v2
         id: changesets
         with:
-          commit: 'chore(release): version packages'
-          title: 'chore(release): version packages'
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          commit-message: 'chore(release): version packages'
+          pr-title: 'chore(release): version packages'
+          github-token: ${{ steps.app-token.outputs.token }}
 
   # The publish itself, behind the `production` Environment: its required
   # reviewer, and its branch policy pinning deployments to `main`.
@@ -174,11 +173,10 @@ jobs:
 
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
 
-      # `publish` runs through pnpm, which is what makes the packages
+      # `publish-script` runs through pnpm, which is what makes the packages
       # installable at all: the `publishConfig` blocks rewrite `exports` from
       # TypeScript source to built `dist`, and plain `npm publish` ignores them.
-      - uses: changesets/action@v1
+      - uses: changesets/action@v2
         with:
-          publish: pnpm run release
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          publish-script: pnpm run release
+          github-token: ${{ steps.app-token.outputs.token }}
