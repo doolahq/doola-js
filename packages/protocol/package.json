@@ -36,7 +36,7 @@
   "devDependencies": {
     "@doola/js": "workspace:*",
     "@microsoft/api-extractor": "^7.59.2",
-    "@types/node": "^22",
+    "@types/node": "^26",
     "esbuild": "^0.24.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
