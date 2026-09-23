@@ -19,7 +19,7 @@ runs:
         # Empty would key every run the same and silently pin a stale browser.
         [ -n "$v" ] || { echo "could not resolve the playwright version"; exit 1; }
         echo "v=$v" >> "$GITHUB_OUTPUT"
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       with:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ steps.version.outputs.v }}
