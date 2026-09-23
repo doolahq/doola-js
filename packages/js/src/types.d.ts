@@ -142,12 +142,12 @@ export interface DoolaOptions {
 
   /**
    * The payment handoff. Fires when the customer completes the wizard
-   * and the draft formation is submitted. On the partner-facing surface
-   * the company then reads as `status: "PENDING"` from
+   * and the draft formation is submitted. The company then reads as
+   * `formationSubmissionStatus: "AWAITING_PAYMENT"` from
    * GET /v1/partner/companies/{companyId} — nothing is filed and nothing
-   * is spent until the partner's server confirms payment. (`PENDING`
-   * today covers both "not paid" and "paid, not picked up yet"; the
-   * discriminator ships with the payment-confirmation endpoint.)
+   * is spent until the partner's server confirms payment with
+   * POST /v1/partner/companies/{companyId}/payment-confirmed, which moves
+   * it to `"PENDING"` and starts the formation.
    *
    * Carries ONLY the company id. Deliberately no amount, state, or
    * add-on selection: anything delivered into the partner page's
