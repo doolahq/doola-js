@@ -1,0 +1,6 @@
+rules:
+  # GitHub's `uses: $/...` self-repository syntax is official (2026-07-30), but
+  # Dependabot and CodeQL's Actions analysis are not yet known to handle it, and
+  # every `./` action here runs after checkout of the same commit. Revisit.
+  self-repository:
+    disable: true
