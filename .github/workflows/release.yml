@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      hasChangesets: ${{ steps.changesets.outputs.has-changesets }}
+      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
       unpublished: ${{ steps.registry.outputs.unpublished }}
     steps:
       # The App rather than GITHUB_TOKEN, and not only for the shared identity:
@@ -41,19 +41,25 @@ jobs:
       #
       # The App has no `workflows` permission, which is fine: `changeset version`
       # touches package.json, CHANGELOG.md and .changeset/ and nothing under
-      # .github/.
-      - uses: actions/create-github-app-token@v3
+      # .github/. The token asks only for what this job does: the version commit
+      # and the pull request.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
         with:
           client-id: ${{ secrets.SEMANTIC_RELEASE_APP_ID }}
           private-key: ${{ secrets.SEMANTIC_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Tags included: `changeset publish` skips a version whose tag it can
           # already see, and a shallow clone has none of them.
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+          # changesets/action writes its own git credentials from its
+          # github-token input when it pushes, so no step needs this one.
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -99,13 +105,15 @@ jobs:
 
           echo "unpublished=$unpublished" >> "$GITHUB_OUTPUT"
 
-      # No `publish-script` and no npm credential: this job only ever runs
+      # No `publish` input and no npm credential: this job only ever runs
       # `changeset version`. Publishing is the job below.
-      - uses: changesets/action@v2
+      #
+      # v1, not v2: see the changesets/action ignore in .github/dependabot.yml.
+      - uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         id: changesets
         with:
-          commit-message: 'chore(release): version packages'
-          pr-title: 'chore(release): version packages'
+          commit: 'chore(release): version packages'
+          title: 'chore(release): version packages'
           github-token: ${{ steps.app-token.outputs.token }}
 
   # The publish itself, behind the `production` Environment: its required
@@ -134,18 +142,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/create-github-app-token@v3
+      # Tags and GitHub releases only.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
         with:
           client-id: ${{ secrets.SEMANTIC_RELEASE_APP_ID }}
           private-key: ${{ secrets.SEMANTIC_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Tags included: `changeset publish` skips a version whose tag it can
           # already see, and a shallow clone has none of them.
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+          # changesets/action writes its own git credentials from its
+          # github-token input when it pushes, so no step needs this one.
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -173,10 +186,10 @@ jobs:
 
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
 
-      # `publish-script` runs through pnpm, which is what makes the packages
+      # `publish` runs through pnpm, which is what makes the packages
       # installable at all: the `publishConfig` blocks rewrite `exports` from
       # TypeScript source to built `dist`, and plain `npm publish` ignores them.
-      - uses: changesets/action@v2
+      - uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
-          publish-script: pnpm run release
+          publish: pnpm run release
           github-token: ${{ steps.app-token.outputs.token }}
