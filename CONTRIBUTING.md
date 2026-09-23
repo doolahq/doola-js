@@ -45,6 +45,13 @@ This section is the canonical definition; everything else in the repo points her
   error — which leaves a document edit to a payload cell as the gap neither
   catches.
 
+Both published surfaces are recorded in `packages/js/etc/js.api.md` and
+`packages/protocol/etc/sdk-protocol.api.md`, generated from the built `.d.ts`,
+and CI fails when either is stale. When you change the API on purpose, run
+`pnpm api:update` and commit the report: its diff is what the reviewer reads as
+the API change. It does not show the `Window.Doola` global augmentation in
+`packages/js/src/index.ts`, so review that by hand.
+
 ## Conventions
 
 - Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:` …).
