@@ -1,2 +1,7 @@
 packages:
   - 'packages/*'
+
+# esbuild ships its binary as a platform package, so its install script is not
+# needed, and pnpm 10 runs no dependency scripts unless listed here.
+ignoredBuiltDependencies:
+  - esbuild
