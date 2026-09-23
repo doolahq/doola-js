@@ -31,3 +31,5 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node scripts/check-budgets.mjs
+      - run: pnpm api:check
+      - run: pnpm check:packages

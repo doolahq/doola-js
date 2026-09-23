@@ -72,6 +72,8 @@ jobs:
       # the artifact the budget gate measures is the artifact that ships.
       - run: pnpm build
       - run: node scripts/check-budgets.mjs
+      - run: pnpm api:check
+      - run: pnpm check:packages
 
       # Whether this tree holds a version the registry does not, which is the
       # question the gated job below asks a reviewer to answer. `hasChangesets`

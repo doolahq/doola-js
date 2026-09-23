@@ -9,12 +9,17 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "build": "pnpm -r build",
+    "api:check": "pnpm -r --no-bail api:check",
+    "api:update": "pnpm -r api:update",
+    "check:packages": "node scripts/check-packages.mjs",
     "release": "changeset publish",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@changesets/cli": "^2.27.0",
-    "prettier": "^3.4.0"
+    "prettier": "^3.4.0",
+    "publint": "^0.3.24"
   }
 }
