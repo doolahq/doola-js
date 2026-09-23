@@ -1,5 +1,10 @@
 # doola-js
 
+[![npm](https://img.shields.io/npm/v/@doola/js)](https://www.npmjs.com/package/@doola/js)
+[![CI](https://github.com/doolahq/doola-js/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/doolahq/doola-js/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/doolahq/doola-js/badge)](https://scorecard.dev/viewer/?uri=github.com/doolahq/doola-js)
+[![license](https://img.shields.io/npm/l/@doola/js)](LICENSE)
+
 Browser SDK for embedding [doola](https://www.doola.com) company formation in your product.
 
 Your customer forms a US company — LLC or C Corp, state filing, EIN, registered agent,
