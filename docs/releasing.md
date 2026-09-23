@@ -59,8 +59,11 @@ never be reused.
 
 2. **The `doola-semantic-release` App with access to this repository**, and its
    two org secrets (`SEMANTIC_RELEASE_APP_ID`, `SEMANTIC_RELEASE_APP_PRIVATE_KEY`)
-   visible to it. This is the identity partners-portal already releases under;
-   if those secrets are scoped to selected repositories, doola-js needs adding.
+   visible to it. This is the identity partners-portal already releases under.
+   **The secrets' repository access must name doola-js explicitly.** The repo is
+   public, and org secrets set to _Private repositories_ never reach a public one:
+   the release failed at its first step (an empty `client-id`) the day the repo
+   went public, 2026-09-23, with no warning when visibility changed.
 3. Nothing else to configure. `access: public` is already set in
    `.changeset/config.json`, which is what lets a scoped package publish
    publicly on the first try.
