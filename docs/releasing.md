@@ -31,44 +31,39 @@ never be reused.
 
 ### One-time setup
 
-Neither package exists on npm yet, so the first release needs these once:
+1. **A Trusted Publisher on each package, on npmjs.com.** There is no npm token:
+   the publish job's GitHub OIDC token is the credential, and npm accepts it only
+   from the workflow and Environment registered here. On each of `@doola/js` and
+   `@doola/sdk-protocol`, under _Settings → Trusted publishing → GitHub Actions_:
 
-1. **An npm automation token**, on the `production` Environment as the secret
-   `NPM_TOKEN`. Classic _Automation_ is the type that works unattended: it is
-   exempt from the 2FA prompt that would otherwise stop a CI publish. This is
-   the only credential the release needs that the release App cannot provide,
-   since publishing to npm is not something a GitHub App can do.
+   | Field             | Value         |
+   | ----------------- | ------------- |
+   | Organization      | `doolahq`     |
+   | Repository        | `doola-js`    |
+   | Workflow filename | `release.yml` |
+   | Environment       | `production`  |
 
-   **On the Environment, not the repository.** A repository secret is readable
-   by any workflow run on any branch, including a `pull_request` run nobody
-   reviewed, and it carries no approval of its own. Every AWS credential here
-   already reaches CI through OIDC into an Environment pinned to `main`, with a
-   named reviewer on `production`. The release App's two org secrets are read
-   ungated the same way, but they only mint a GitHub token scoped to this
-   repository — this is the credential that reaches npm.
+   Renaming `release.yml` or the `production` Environment breaks publishing until
+   this is updated to match. A new published package needs its own entry before
+   its first release.
 
-   `NPM_TOKEN` is set on the `production` Environment (2026-09-22). **Deleting
-   the repository-level copy is the step that does the security work, and
-   nothing here will tell you if it is skipped.** An Environment secret shadows
-   a repository one, it does not replace it: a job declaring
-   `environment: production` still falls through to the repository, and then to
-   the organization, for any name the Environment does not hold. So the publish
-   succeeds either way, and while the repository copy exists the token stays
-   readable by any workflow run on any branch — which is the whole problem this
-   section opens with.
+   Trusted publishing also makes npm attach a **provenance attestation** to every
+   version: the npm page links the exact commit and workflow run that built it.
 
-   **The token expires on 2026-12-16.** Nothing warns first — a release after
-   that date fails at the publish step, with the version pull request already
-   merged. That is the deadline on Trusted Publishing below, not a soft target.
-
-   npm Trusted Publishing removes the token altogether and is the end state
-   (PENG-6617); this is the shape to hold until the first publish makes that
-   configurable.
+   Once a release has gone out this way, set each package's _Publishing access_ to
+   **Require two-factor authentication and disallow tokens**, so a leaked token can
+   never publish, and revoke the old `gha-doola-js-publish` automation token and the
+   `NPM_TOKEN` secret it lived in (on the `production` Environment). The first two
+   releases, `0.1.0` and `0.1.1`, were published with that token and carry no
+   provenance.
 
 2. **The `doola-semantic-release` App with access to this repository**, and its
    two org secrets (`SEMANTIC_RELEASE_APP_ID`, `SEMANTIC_RELEASE_APP_PRIVATE_KEY`)
-   visible to it. This is the identity partners-portal already releases under;
-   if those secrets are scoped to selected repositories, doola-js needs adding.
+   visible to it. This is the identity partners-portal already releases under.
+   **The secrets' repository access must name doola-js explicitly.** The repo is
+   public, and org secrets set to _Private repositories_ never reach a public one:
+   the release failed at its first step (an empty `client-id`) the day the repo
+   went public, 2026-09-23, with no warning when visibility changed.
 3. Nothing else to configure. `access: public` is already set in
    `.changeset/config.json`, which is what lets a scoped package publish
    publicly on the first try.

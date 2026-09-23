@@ -141,6 +141,12 @@ jobs:
     environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # id-token is the npm credential: npm Trusted Publishing exchanges this
+    # job's OIDC token for a publish, so no npm secret exists anywhere. npm
+    # accepts it only from this workflow file in the production Environment.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       # Tags and GitHub releases only.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -168,23 +174,11 @@ jobs:
       - run: pnpm build
       - run: node scripts/check-budgets.mjs
 
-      # Home config, not the repo's `.npmrc`: a token in a tracked file is a
-      # token in the history.
-      #
-      # Fails rather than warns. This job only runs when something is due to
-      # publish, so a missing token is misconfiguration, most likely the secret
-      # not being on this Environment, and a release that goes green having
-      # published nothing is worse than a red one.
-      - name: Authenticate to npm
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "::error::NPM_TOKEN is unset on the production Environment. See docs/releasing.md."
-            exit 1
-          fi
-
-          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
+      # `pnpm publish` packs the tarball and hands it to the npm CLI, so npm is
+      # what performs the OIDC exchange, and Trusted Publishing needs npm
+      # 11.5.1 or later. Node 22 bundles npm 10. Pinned exactly, and it is npm
+      # itself: the one tool this job trusts to publish either way.
+      - run: npm install --global npm@11.20.0 # zizmor: ignore[adhoc-packages]
 
       # `publish` runs through pnpm, which is what makes the packages
       # installable at all: the `publishConfig` blocks rewrite `exports` from
