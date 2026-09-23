@@ -1,6 +1,6 @@
 {
   "name": "@doola/sdk-protocol",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The wire format doola's SDK loader and embedded app speak to each other.",
   "license": "MIT",
   "repository": {
