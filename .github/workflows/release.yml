@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
+      hasChangesets: ${{ steps.changesets.outputs.has-changesets }}
       unpublished: ${{ steps.registry.outputs.unpublished }}
     steps:
       # The App rather than GITHUB_TOKEN, and not only for the shared identity:
@@ -57,8 +57,8 @@ jobs:
           # already see, and a shallow clone has none of them.
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
-          # changesets/action writes its own git credentials from its
-          # github-token input when it pushes, so no step needs this one.
+          # changesets/action v2 commits and tags through the GitHub API with its
+          # github-token input, so no step needs the token left in .git/config.
           persist-credentials: false
 
       - uses: ./.github/actions/setup
@@ -107,15 +107,13 @@ jobs:
 
           echo "unpublished=$unpublished" >> "$GITHUB_OUTPUT"
 
-      # No `publish` input and no npm credential: this job only ever runs
+      # No `publish-script` and no npm credential: this job only ever runs
       # `changeset version`. Publishing is the job below.
-      #
-      # v1, not v2: see the changesets/action ignore in .github/dependabot.yml.
-      - uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+      - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         id: changesets
         with:
-          commit: 'chore(release): version packages'
-          title: 'chore(release): version packages'
+          commit-message: 'chore(release): version packages'
+          pr-title: 'chore(release): version packages'
           github-token: ${{ steps.app-token.outputs.token }}
 
   # The publish itself, behind the `production` Environment: its required
@@ -164,8 +162,8 @@ jobs:
           # already see, and a shallow clone has none of them.
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
-          # changesets/action writes its own git credentials from its
-          # github-token input when it pushes, so no step needs this one.
+          # changesets/action v2 commits and tags through the GitHub API with its
+          # github-token input, so no step needs the token left in .git/config.
           persist-credentials: false
 
       - uses: ./.github/actions/setup
@@ -182,10 +180,10 @@ jobs:
       # itself: the one tool this job trusts to publish either way.
       - run: npm install --global npm@11.20.0 # zizmor: ignore[adhoc-packages]
 
-      # `publish` runs through pnpm, which is what makes the packages
+      # `publish-script` runs through pnpm, which is what makes the packages
       # installable at all: the `publishConfig` blocks rewrite `exports` from
       # TypeScript source to built `dist`, and plain `npm publish` ignores them.
-      - uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+      - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          publish: pnpm run release
+          publish-script: pnpm run release
           github-token: ${{ steps.app-token.outputs.token }}
