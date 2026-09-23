@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # "/" alone scans .github/workflows only. The composite actions every job
+    # runs live under .github/actions, which is how pnpm/action-setup and
+    # actions/cache sat on the deprecated Node 20 runtime unnoticed.
+    directories: ['/', '/.github/actions/*']
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      actions:
+        patterns: ['*']
