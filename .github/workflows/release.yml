@@ -101,7 +101,7 @@ jobs:
 
       # No `publish` input and no npm credential: this job only ever runs
       # `changeset version`. Publishing is the job below.
-      - uses: changesets/action@v1
+      - uses: changesets/action@v2
         id: changesets
         with:
           commit: 'chore(release): version packages'
@@ -177,7 +177,7 @@ jobs:
       # `publish` runs through pnpm, which is what makes the packages
       # installable at all: the `publishConfig` blocks rewrite `exports` from
       # TypeScript source to built `dist`, and plain `npm publish` ignores them.
-      - uses: changesets/action@v1
+      - uses: changesets/action@v2
         with:
           publish: pnpm run release
         env:
