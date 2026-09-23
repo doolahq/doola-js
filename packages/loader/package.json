@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "build": "tsup src/index.ts --format iife --minify --target es2020 --clean --out-dir dist",
     "test": "vitest run && pnpm run test:browser",
-    "test:browser": "pnpm run build && playwright test"
+    "test:browser": "pnpm --filter @doola/js build && pnpm run build && playwright test"
   },
   "devDependencies": {
     "@doola/js": "workspace:*",
