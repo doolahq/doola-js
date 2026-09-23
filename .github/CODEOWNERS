@@ -1,0 +1,4 @@
+# The main ruleset requires a code owner's approval on every pull request.
+# Most of what ships here is a public contract that partners pin forever once
+# they integrate (CONTRIBUTING.md), so review stays with the people who own it.
+* @vladyslavtatarin @Mehayoo
