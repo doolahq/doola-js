@@ -35,3 +35,15 @@ updates:
     groups:
       minor-and-patch:
         update-types: ['minor', 'patch']
+    # Closing a pull request only skips that one release, so a major we cannot
+    # take comes back with its next patch unless it is ignored here.
+    ignore:
+      # Node's types must match the oldest Node in engines, or tests compile
+      # against APIs CI lacks. Bump the major by hand when that floor moves.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # TypeScript 7 drops the JS compiler API that tsup --dts needs, so
+      # `pnpm build` emits no .d.ts (#24). Remove once .d.ts is built another
+      # way. 6.x stays open: it builds with ignoreDeprecations set to "6.0".
+      - dependency-name: 'typescript'
+        versions: ['>=7']
