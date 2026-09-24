@@ -25,66 +25,15 @@ Every screen, field, and validation lives inside that iframe on doola's origin:
   improvements ship inside the iframe. The npm package pins the shape of the call,
   never the behavior behind it.
 
-## Install
+## Get started
+
+The integration guide lives in the [`@doola/js` README](./packages/js/README.md), the page npm
+shows. It covers keys and environments, the one route your server hosts, mounting, the payment
+handoff, errors, Content Security Policy and browser support.
 
 ```bash
 npm install @doola/js
 ```
-
-## The one route you host
-
-Your server is the only place your doola API key lives. It mints a short-lived
-session for your signed-in user:
-
-```js
-// ~10 lines, needs no database
-app.post('/doola-session', async (req, res) => {
-  if (!req.user) return res.status(401).end();
-
-  const r = await fetch('https://api.doola.com/v1/partner/customer-sessions', {
-    method: 'POST',
-    headers: { authorization: process.env.DOOLA_API_KEY, 'content-type': 'application/json' },
-    body: JSON.stringify({ email: req.user.email }),
-  });
-
-  // one exception: doola's 401 means YOUR key or tenant, not the
-  // customer's session — forwarding it would loop them to your login.
-  if (!r.ok) return res.status(r.status === 401 ? 502 : r.status).end();
-
-  // doola wraps every response in { payload, error }. Forward exactly the
-  // fields the loader consumes, never the whole body.
-  const { accessToken, expiresIn } = (await r.json()).payload;
-  res.json({ accessToken, expiresIn });
-});
-```
-
-## Mount
-
-```js
-import { loadDoola } from '@doola/js';
-
-const doola = await loadDoola({
-  publishableKey: 'pk_live_…',
-  fetchAccessToken: async () => {
-    const r = await fetch('/doola-session', { method: 'POST' });
-    if (!r.ok) throw Object.assign(new Error('doola session'), { status: r.status });
-    return r.json();
-  },
-  onAuthError: (e) => {
-    if (e.type === 'partner_session_expired') location.href = '/login';
-  },
-  onFormed: ({ companyId }) => startCheckout(companyId),
-});
-
-// no arguments: the app decides what renders from what the session resolves to
-document.querySelector('#doola').append(doola.create());
-```
-
-Optional but cheap: `<link rel="preconnect" href="https://sdk.doola.com" />` in your
-`<head>` lets the iframe's TLS handshake overlap the session mint.
-
-Branding — your logo, colors, and typography — is configured once in the
-[partner portal](https://portal.doola.com) and applies before first paint.
 
 ## Packages
 

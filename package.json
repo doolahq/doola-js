@@ -6,12 +6,13 @@
     "node": "^22.13 || ^24 || >=26"
   },
   "scripts": {
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r typecheck && node scripts/check-readme-examples.mjs",
     "test": "pnpm -r test",
     "build": "pnpm -r build",
     "api:check": "pnpm -r --no-bail api:check",
     "api:update": "pnpm -r api:update",
     "check:packages": "node scripts/check-packages.mjs",
+    "check:readme": "node scripts/check-readme-examples.mjs",
     "release": "changeset publish",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

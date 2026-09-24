@@ -1,13 +1,14 @@
 {
   "name": "@doola/sdk-protocol",
   "version": "0.1.0",
-  "description": "The wire format doola's SDK loader and embedded app speak to each other.",
+  "description": "Internal to doola: the wire format between doola's SDK loader and embedded app. Partners use @doola/js.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/doolahq/doola-js.git",
     "directory": "packages/protocol"
   },
+  "homepage": "https://github.com/doolahq/doola-js/tree/main/packages/protocol#readme",
   "type": "module",
   "sideEffects": false,
   "main": "./src/index.ts",
