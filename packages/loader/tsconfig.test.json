@@ -1,6 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // The browser harness runs HTTP servers and the tests read docs/errors.md,
+    // so the test program needs Node's types; src must not. vitest 3's .d.ts
+    // chain used to supply them implicitly, and vitest 4 dropped that.
+    "types": ["node"],
     // Tests pull in vitest, whose bundled .d.ts chain (vite, rollup,
     // @types/node) does not compile under the base's ES2020 lib and empty
     // `types`. skipLibCheck skips ALL .d.ts in this program — including the

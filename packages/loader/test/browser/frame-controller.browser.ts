@@ -7,7 +7,7 @@ import {
   READY_AFTER_LOAD_MS,
 } from '../../src/policy';
 import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION } from '../../src/protocol';
-import { APP_PAGE, startHarness, type Harness } from './harness';
+import { APP_PAGE, navigatedFrame, startHarness, type Harness } from './harness';
 
 let harness: Harness;
 
@@ -100,23 +100,10 @@ async function interceptFrame(page: Page, handler: (route: Route) => unknown): P
  * is about.
  */
 async function appFrame(page: Page): Promise<Frame> {
-  const frame = await navigatedFrame(page);
+  const frame = await navigatedFrame(page, harness.sdkOrigin);
   await frame.waitForFunction(() => Array.isArray((window as unknown as AppWindow).__received));
 
   return frame;
-}
-
-async function navigatedFrame(page: Page): Promise<Frame> {
-  const find = (): Frame | undefined =>
-    page.frames().find((candidate) => candidate.url().startsWith(harness.sdkOrigin + '/'));
-
-  await expect
-    .poll(() => find() !== undefined, {
-      message: 'the app frame should navigate to the sdk origin',
-    })
-    .toBe(true);
-
-  return find() as Frame;
 }
 
 /**
@@ -128,7 +115,7 @@ async function navigatedFrame(page: Page): Promise<Frame> {
  * deadline moves while the driver waits for the element's handler to run.
  */
 async function loadedFrame(page: Page): Promise<Frame> {
-  const frame = await navigatedFrame(page);
+  const frame = await navigatedFrame(page, harness.sdkOrigin);
 
   await frame.waitForLoadState('load');
   await page.waitForTimeout(50);

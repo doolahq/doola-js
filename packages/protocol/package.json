@@ -29,14 +29,17 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "api:check": "api-extractor run",
+    "api:update": "pnpm run build && api-extractor run --local"
   },
   "devDependencies": {
     "@doola/js": "workspace:*",
+    "@microsoft/api-extractor": "^7.59.2",
     "@types/node": "^22",
     "esbuild": "^0.28.1",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^5.0.1"
   }
 }

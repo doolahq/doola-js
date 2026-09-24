@@ -1,0 +1,23 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+  // The built declarations, not src: this is the surface partners compile against.
+  "mainEntryPointFilePath": "<projectFolder>/dist/index.d.ts",
+  "apiReport": { "enabled": true },
+  "docModel": { "enabled": false },
+  "dtsRollup": { "enabled": false },
+  // On by default, and it would write a tsdoc-metadata.json into src.
+  "tsdocMetadata": { "enabled": false },
+  "newlineKind": "lf",
+  "messages": {
+    "extractorMessageReporting": {
+      // Release tags drive trimmed rollups for @beta/@alpha APIs. Everything
+      // exported here is public, so a missing tag says nothing.
+      "ae-missing-release-tag": { "logLevel": "none" }
+    },
+    // Our JSDoc is prose (`{companyId}` paths, `->` arrows) that TSDoc reads as
+    // malformed tags, and the report carries no doc comments to protect.
+    "tsdocMessageReporting": {
+      "default": { "logLevel": "none" }
+    }
+  }
+}

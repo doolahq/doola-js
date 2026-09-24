@@ -9,14 +9,15 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "build": "tsup src/index.ts --format iife --minify --target es2020 --clean --out-dir dist",
     "test": "vitest run && pnpm run test:browser",
-    "test:browser": "pnpm run build && playwright test"
+    "test:browser": "pnpm --filter @doola/js build && pnpm run build && playwright test"
   },
   "devDependencies": {
     "@doola/js": "workspace:*",
     "@doola/sdk-protocol": "workspace:*",
     "@playwright/test": "^1.63.0",
+    "@types/node": "^22",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^5.0.1"
   }
 }

@@ -41,19 +41,25 @@ jobs:
       #
       # The App has no `workflows` permission, which is fine: `changeset version`
       # touches package.json, CHANGELOG.md and .changeset/ and nothing under
-      # .github/.
-      - uses: actions/create-github-app-token@v3
+      # .github/. The token asks only for what this job does: the version commit
+      # and the pull request.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
         with:
           client-id: ${{ secrets.SEMANTIC_RELEASE_APP_ID }}
           private-key: ${{ secrets.SEMANTIC_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Tags included: `changeset publish` skips a version whose tag it can
           # already see, and a shallow clone has none of them.
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+          # changesets/action v2 commits and tags through the GitHub API with its
+          # github-token input, so no step needs the token left in .git/config.
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -66,6 +72,8 @@ jobs:
       # the artifact the budget gate measures is the artifact that ships.
       - run: pnpm build
       - run: node scripts/check-budgets.mjs
+      - run: pnpm api:check
+      - run: pnpm check:packages
 
       # Whether this tree holds a version the registry does not, which is the
       # question the gated job below asks a reviewer to answer. `hasChangesets`
@@ -101,7 +109,7 @@ jobs:
 
       # No `publish-script` and no npm credential: this job only ever runs
       # `changeset version`. Publishing is the job below.
-      - uses: changesets/action@v2
+      - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         id: changesets
         with:
           commit-message: 'chore(release): version packages'
@@ -133,19 +141,30 @@ jobs:
     environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # id-token is the npm credential: npm Trusted Publishing exchanges this
+    # job's OIDC token for a publish, so no npm secret exists anywhere. npm
+    # accepts it only from this workflow file in the production Environment.
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/create-github-app-token@v3
+      # Tags and GitHub releases only.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
         with:
           client-id: ${{ secrets.SEMANTIC_RELEASE_APP_ID }}
           private-key: ${{ secrets.SEMANTIC_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Tags included: `changeset publish` skips a version whose tag it can
           # already see, and a shallow clone has none of them.
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+          # changesets/action v2 commits and tags through the GitHub API with its
+          # github-token input, so no step needs the token left in .git/config.
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -155,28 +174,16 @@ jobs:
       - run: pnpm build
       - run: node scripts/check-budgets.mjs
 
-      # Home config, not the repo's `.npmrc`: a token in a tracked file is a
-      # token in the history.
-      #
-      # Fails rather than warns. This job only runs when something is due to
-      # publish, so a missing token is misconfiguration, most likely the secret
-      # not being on this Environment, and a release that goes green having
-      # published nothing is worse than a red one.
-      - name: Authenticate to npm
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "::error::NPM_TOKEN is unset on the production Environment. See docs/releasing.md."
-            exit 1
-          fi
-
-          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
+      # `pnpm publish` packs the tarball and hands it to the npm CLI, so npm is
+      # what performs the OIDC exchange, and Trusted Publishing needs npm
+      # 11.5.1 or later. Node 22 bundles npm 10. Pinned exactly, and it is npm
+      # itself: the one tool this job trusts to publish either way.
+      - run: npm install --global npm@11.20.0 # zizmor: ignore[adhoc-packages]
 
       # `publish-script` runs through pnpm, which is what makes the packages
       # installable at all: the `publishConfig` blocks rewrite `exports` from
       # TypeScript source to built `dist`, and plain `npm publish` ignores them.
-      - uses: changesets/action@v2
+      - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           publish-script: pnpm run release
           github-token: ${{ steps.app-token.outputs.token }}
