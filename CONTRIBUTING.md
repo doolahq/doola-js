@@ -33,6 +33,14 @@ This section is the canonical definition; everything else in the repo points her
   unconditionally, so the loader's `window.Doola ??= { init }` — first
   evaluation wins — is part of the contract with every shim ever published,
   not a local nicety.
+- **The shim's Trusted Types names are contract too.** Partners who enforce
+  Trusted Types allow the policy name `doola-js` in their CSP, and every
+  published shim reads the policy from
+  `window[Symbol.for('@doola/js trusted types policy')]`, so two copies on one
+  page share the policy instead of colliding. Renaming the policy breaks every
+  page that allows it, and renaming the key breaks any page that bundles an old
+  copy next to a new one, which no test catches. A new name only ever comes
+  with a new loader path.
 - **Internal but versioned:** `docs/protocol.md`, implemented by
   `packages/protocol` (`@doola/sdk-protocol`). Partners never touch either, but
   the loader and the embedded app deploy independently, so it carries its own
@@ -49,8 +57,8 @@ Both published surfaces are recorded in `packages/js/etc/js.api.md` and
 `packages/protocol/etc/sdk-protocol.api.md`, generated from the built `.d.ts`,
 and CI fails when either is stale. When you change the API on purpose, run
 `pnpm api:update` and commit the report: its diff is what the reviewer reads as
-the API change. It does not show the `Window.Doola` global augmentation in
-`packages/js/src/index.ts`, so review that by hand.
+the API change. It does not show the `Window.Doola` global augmentation or the
+Trusted Types names in `packages/js/src/index.ts`, so review those by hand.
 
 ## Conventions
 
