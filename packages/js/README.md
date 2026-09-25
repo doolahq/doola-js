@@ -50,18 +50,81 @@ Test and live are separate stacks with separate data. Use a matching pair:
 npm install @doola/js
 ```
 
-TypeScript types are included. The package is ESM and CommonJS, and it runs in the browser only.
+TypeScript types are included. The package is ESM and CommonJS, with two entry points: `@doola/js`
+runs in the browser only, and `@doola/js/server` runs on your server, on Node 18 or later or any
+runtime with the web-standard `fetch`.
 
 ## 1. Mint a session on your server
 
 Your server is the only place your secret key lives. Add one authenticated route that
 [creates a customer session](https://docs.doola.com/api/api-reference/customer-sessions/create-a-customer-session)
-for the signed-in customer. It needs no database. The handler takes a web-standard `Request` and
-returns a `Response`. That makes it a Next.js route handler as written, and a one-line wrapper in
-Remix (`action`), Hono, Bun, Deno and Cloudflare Workers, where `process.env` needs the
-`nodejs_compat` flag. Express and Fastify need a thin adapter.
+for the signed-in customer. It needs no database. `createSessionHandler` builds the route: it
+takes the web-standard `Request` and returns a `Response`. That makes it a Next.js route handler
+as written, and a one-line wrapper in Remix (`action`), Hono, Bun, Deno and Cloudflare Workers,
+where `process.env` needs the `nodejs_compat` flag.
 
 <!-- example: session-route -->
+
+```ts
+// POST /doola-session
+import { createSessionHandler } from '@doola/js/server';
+
+export const POST = createSessionHandler({
+  // Your dk_ secret key. Its prefix selects the API host, and a missing key throws here.
+  apiKey: process.env.DOOLA_API_KEY,
+
+  // Return null when nobody is signed in. The route answers 401, and the loader reports
+  // partner_session_expired.
+  getCustomer: async (request) => {
+    const user = await getSignedInUser(request); // your own auth
+    // externalCustomerId is optional but recommended: it is matched before the email, so a
+    // customer who changes their email with you stays the same doola customer.
+    return user ? { email: user.email, externalCustomerId: user.id } : null;
+  },
+});
+```
+
+The customer can also carry `firstName`, `lastName`, `countryOfResidence` and `phoneNumber`,
+which doola uses only when it creates the customer.
+
+For Express, Fastify or your own routing, `createCustomerSession` returns the status and body to
+send:
+
+```ts
+import { createCustomerSession } from '@doola/js/server';
+
+app.post('/doola-session', async (req, res) => {
+  const user = await getSignedInUser(req); // your own auth
+  if (!user) {
+    res.status(401).end();
+    return;
+  }
+
+  const { status, body } = await createCustomerSession({
+    apiKey: process.env.DOOLA_API_KEY,
+    customer: { email: user.email, externalCustomerId: user.id },
+  });
+
+  if (body) res.status(status).json(body);
+  else res.status(status).end();
+});
+```
+
+<details>
+<summary>Not on JavaScript? The same route over plain HTTP</summary>
+
+From any other language, call `POST /v1/partner/customer-sessions` with your secret key as the
+whole `Authorization` header, with no `Bearer` prefix. Then keep the rules the helper owns:
+
+- **doola's 401 becomes a 502.** It means your key or tenant is wrong, not the customer's session.
+  Passed on, the loader would read it as `partner_session_expired` and send a signed-in customer to
+  your login page. Every other status passes through, so doola's 409 still reaches the loader as
+  `email_in_use`.
+- **Unwrap the response.** doola wraps every response in `{ payload, error }`. Send the browser
+  only `accessToken` and `expiresIn` from the payload, never the whole body.
+- **A failure to reach doola is a 502 too**, as is a response that is not JSON.
+
+<!-- example: session-route-http -->
 
 ```ts
 // POST /doola-session
@@ -83,20 +146,17 @@ export async function POST(request: Request): Promise<Response> {
   const r = await fetch(`${DOOLA_API}/v1/partner/customer-sessions`, {
     method: 'POST',
     headers: { authorization: doolaKey(), 'content-type': 'application/json' },
-    // externalCustomerId is optional but recommended: it is matched before the email, so a
-    // customer who changes their email with you stays the same doola customer.
     body: JSON.stringify({ email: user.email, externalCustomerId: user.id }),
   });
 
-  // doola's 401 means your key or tenant is wrong, not the customer's session. Passing it on would
-  // send a signed-in customer to your login page, so report it as a 502.
   if (!r.ok) return new Response(null, { status: r.status === 401 ? 502 : r.status });
 
-  // doola wraps every response in { payload, error }. Forward only what the browser needs.
   const { payload } = await r.json();
   return Response.json({ accessToken: payload.accessToken, expiresIn: payload.expiresIn });
 }
 ```
+
+</details>
 
 The token acts as that one customer and expires in minutes. The loader calls your route again to
 renew it, so a doola session never outlives your own login. Protect the route like any other
@@ -165,10 +225,11 @@ checkout starts:
    [Confirm payment](https://docs.doola.com/api/api-reference/companies/confirm-payment-for-a-draft-formation).
    Nothing is filed until you do:
 
-<!-- example: confirm-payment after session-route -->
+<!-- example: confirm-payment after session-route-http -->
 
 ```ts
-// On your server, after the charge succeeds. DOOLA_API and doolaKey are as in step 1.
+// On your server, after the charge succeeds. DOOLA_API and doolaKey are as in the plain HTTP
+// route in step 1.
 async function confirmPayment(companyId: string, paymentReference: string): Promise<void> {
   const path = `/v1/partner/companies/${encodeURIComponent(companyId)}/payment-confirmed`;
 
@@ -248,8 +309,8 @@ its styles through the CSSOM, which `style-src` does not restrict.
 
 ## Frameworks and SSR
 
-`@doola/js` runs in the browser only. On the server `loadDoola()` rejects, so call it from a
-client-only path: `useEffect`, `onMounted`, a `'use client'` component or a dynamic import.
+`loadDoola()` runs in the browser only. On the server it rejects, so call it from a client-only
+path: `useEffect`, `onMounted`, a `'use client'` component or a dynamic import.
 
 - **One instance per page.** Calling `loadDoola()` again with the same key returns the live
   instance, so React StrictMode's double invoke is safe. A different key rejects until you call
@@ -268,7 +329,7 @@ the session in memory and needs no third-party cookies, so it works in browsers 
 ## Security
 
 - Your secret `dk_` key belongs on your server only. The loader refuses anything that is not a
-  publishable key.
+  publishable key, and `@doola/js/server` refuses a publishable one.
 - Treat `companyId` like any id from a browser: check it on your server before you charge.
 - Keep `origin` a constant. Never derive it from a URL parameter or user input.
 - Report vulnerabilities privately, as described in

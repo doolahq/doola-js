@@ -7,7 +7,7 @@ bugs and documentation; API surface changes are driven by the doola team.
 
 This section is the canonical definition; everything else in the repo points here.
 
-- **Public contract:** `packages/js/src/types.d.ts` (re-exported by `@doola/js`) and `docs/errors.md`. Once
+- **Public contract:** `packages/js/src/types.d.ts` (re-exported by `@doola/js`), `packages/js/src/server.ts` (`@doola/js/server`) and `docs/errors.md`. Once
   partners ship against them, every exported name and documented semantic is
   effectively permanent. Review any change as a public-API change: additive is
   fine, breaking requires a major and a migration note, and removals
@@ -45,9 +45,9 @@ This section is the canonical definition; everything else in the repo points her
   error — which leaves a document edit to a payload cell as the gap neither
   catches.
 
-Both published surfaces are recorded in `packages/js/etc/js.api.md` and
-`packages/protocol/etc/sdk-protocol.api.md`, generated from the built `.d.ts`,
-and CI fails when either is stale. When you change the API on purpose, run
+The published surfaces are recorded in `packages/js/etc/js.api.md`,
+`packages/js/etc/js-server.api.md` and `packages/protocol/etc/sdk-protocol.api.md`,
+generated from the built `.d.ts`, and CI fails when any is stale. When you change the API on purpose, run
 `pnpm api:update` and commit the report: its diff is what the reviewer reads as
 the API change. It does not show the `Window.Doola` global augmentation in
 `packages/js/src/index.ts`, so review that by hand.
