@@ -1,5 +1,12 @@
 # @doola/js
 
+## 0.1.3
+
+### Patch Changes
+
+- a582a43: The npm page now carries the full integration guide: keys and environments, the session route, mounting, the payment handoff, options, errors, Content Security Policy, browser support and lifecycle. Every TypeScript example in it is type-checked in CI.
+- a3ebcee: `loadDoola()` now works on pages that enforce Trusted Types. The shim creates a `doola-js` policy that accepts only the loader URL, so allow it with `trusted-types doola-js`. Where the name is not allowed, `loadDoola()` rejects with a message naming that directive instead of the browser's `TrustedScriptURL` error. Pages without Trusted Types are unaffected.
+
 ## 0.1.2
 
 ### Patch Changes
