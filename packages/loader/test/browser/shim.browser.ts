@@ -71,6 +71,17 @@ function loaderTags(page: Page): Promise<{ async: boolean; crossOrigin: string |
   );
 }
 
+/** Mounts the loaded instance into `#mount` and waits for the frame to navigate to the app. */
+async function mountFrame(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as ShimWindow;
+    document.getElementById('mount')?.appendChild(w.__instance.create());
+  });
+
+  await expect(page.locator('#mount doola-embed iframe')).toHaveCount(1);
+  await navigatedFrame(page, harness.sdkOrigin);
+}
+
 test('injects one async, anonymous-CORS tag, however many calls race it', async ({ page }) => {
   await page.route(LOADER_URL, (route) => edge(route));
   await openShimPage(page);
@@ -91,13 +102,7 @@ test('resolves with the real loader, whose create() mounts the app frame', async
 
   expect(await load(page)).toEqual({ loaded: true });
 
-  await page.evaluate(() => {
-    const w = window as unknown as ShimWindow;
-    document.getElementById('mount')?.appendChild(w.__instance.create());
-  });
-
-  await expect(page.locator('#mount doola-embed iframe')).toHaveCount(1);
-  await navigatedFrame(page, harness.sdkOrigin);
+  await mountFrame(page);
 });
 
 const failures = {
@@ -223,13 +228,7 @@ for (const [mode, viewport] of Object.entries(viewports)) {
     expect(await load(page)).toEqual({ loaded: true });
     expect(await loaderTags(page)).toEqual([{ async: true, crossOrigin: 'anonymous' }]);
 
-    await page.evaluate(() => {
-      const w = window as unknown as ShimWindow;
-      document.getElementById('mount')?.appendChild(w.__instance.create());
-    });
-
-    await expect(page.locator('#mount doola-embed iframe')).toHaveCount(1);
-    await navigatedFrame(page, harness.sdkOrigin);
+    await mountFrame(page);
     expect(
       await page.evaluate(() => document.querySelector('iframe')?.style.position === 'fixed'),
     ).toBe(mode === 'full-screen');
