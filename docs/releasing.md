@@ -58,12 +58,17 @@ never be reused.
    provenance.
 
 2. **The `doola-semantic-release` App with access to this repository**, and its
-   two org secrets (`SEMANTIC_RELEASE_APP_ID`, `SEMANTIC_RELEASE_APP_PRIVATE_KEY`)
-   visible to it. This is the identity partners-portal already releases under.
-   **The secrets' repository access must name doola-js explicitly.** The repo is
-   public, and org secrets set to _Private repositories_ never reach a public one:
-   the release failed at its first step (an empty `client-id`) the day the repo
-   went public, 2026-09-23, with no warning when visibility changed.
+   key as environment secrets. This is the identity partners-portal already
+   releases under.
+   - Create a `release` Environment: deployment branches limited to one branch
+     rule for `main`, no required reviewers, admin bypass off. The ungated
+     `version` job reads the key from here.
+   - Add `SEMANTIC_RELEASE_APP_ID` and `SEMANTIC_RELEASE_APP_PRIVATE_KEY` as
+     secrets on **both** `release` and `production`. The `publish` job mints its
+     own token for tags and GitHub releases, and it runs under `production`.
+   - Not org secrets: an org secret is readable by any branch of every repo it
+     reaches. An empty `client-id` at a job's first step means that job's
+     environment is missing the key.
 3. Nothing else to configure. `access: public` is already set in
    `.changeset/config.json`, which is what lets a scoped package publish
    publicly on the first try.

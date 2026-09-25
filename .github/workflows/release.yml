@@ -26,9 +26,11 @@ jobs:
   # Opens and updates the version pull request. Deliberately not gated: it
   # publishes nothing, needs no npm credential, and making someone approve the
   # opening of a pull request is how a gate becomes a reflex -- which is the
-  # gate that matters below.
+  # gate that matters below. The `release` environment is only where the App
+  # key lives: it must be restricted to main, with no reviewers.
   version:
     runs-on: ubuntu-latest
+    environment: release
     timeout-minutes: 20
     outputs:
       hasChangesets: ${{ steps.changesets.outputs.has-changesets }}
