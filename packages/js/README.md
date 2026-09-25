@@ -32,10 +32,10 @@ screen, field and validation lives inside that iframe:
 You need two keys. The publishable key selects the environment for the browser, and the secret
 key does the same on your server.
 
-| Key         | Prefix                   | Where it lives                                  | How to get it                                                                                                                                                  |
-| ----------- | ------------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Publishable | `pk_test_` or `pk_live_` | Your frontend. Public by design.                | Comes with your SDK access: [Partner portal](https://partners-portal.doola.com), under **SDK**, then **Install**. It identifies you and selects your branding. |
-| Secret      | `dk_test_` or `dk_live_` | Your server only. Never in a browser or bundle. | [Partner portal](https://partners-portal.doola.com), under **Settings**, then **API keys**.                                                                    |
+| Key         | Prefix                   | Where it lives                                  | How to get it                                                                               |
+| ----------- | ------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Publishable | `pk_test_` or `pk_live_` | Your frontend. Public by design.                | Issued by doola with your SDK access. It identifies you and selects your branding.          |
+| Secret      | `dk_test_` or `dk_live_` | Your server only. Never in a browser or bundle. | [Partner portal](https://partners-portal.doola.com), under **Settings**, then **API Keys**. |
 
 Test and live are separate stacks with separate data. Use a matching pair:
 
@@ -56,21 +56,24 @@ TypeScript types are included. The package is ESM and CommonJS, and it runs in t
 
 Your server is the only place your secret key lives. Add one authenticated route that
 [creates a customer session](https://docs.doola.com/api/api-reference/customer-sessions/create-a-customer-session)
-for the signed-in customer. It needs no database. This handler uses the web-standard `Request`
-and `Response`, so it drops into Next.js route handlers, Remix, Hono, Bun, Deno and Cloudflare
-Workers as is. Express and Fastify need a thin adapter.
+for the signed-in customer. It needs no database. The handler takes a web-standard `Request` and
+returns a `Response`. That makes it a Next.js route handler as written, and a one-line wrapper in
+Remix (`action`), Hono, Bun, Deno and Cloudflare Workers, where `process.env` needs the
+`nodejs_compat` flag. Express and Fastify need a thin adapter.
 
 <!-- example: session-route -->
 
 ```ts
 // POST /doola-session
 const DOOLA_API = 'https://api.doola.com'; // https://api.test.doola.com with a dk_test_ key
-const apiKey = requiredEnv('DOOLA_API_KEY'); // your dk_ secret key
 
-function requiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is not set`);
-  return value;
+// Read per request, never at import: Next.js runs this module during `next build`, where your
+// secret is often not set.
+function doolaKey(): string {
+  const key = process.env.DOOLA_API_KEY; // your dk_ secret key
+  if (!key) throw new Error('DOOLA_API_KEY is not set');
+
+  return key;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -79,7 +82,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const r = await fetch(`${DOOLA_API}/v1/partner/customer-sessions`, {
     method: 'POST',
-    headers: { authorization: apiKey, 'content-type': 'application/json' },
+    headers: { authorization: doolaKey(), 'content-type': 'application/json' },
     // externalCustomerId is optional but recommended: it is matched before the email, so a
     // customer who changes their email with you stays the same doola customer.
     body: JSON.stringify({ email: user.email, externalCustomerId: user.id }),
@@ -125,6 +128,7 @@ const doola = await loadDoola({
   onFormed: ({ companyId }) => startCheckout(companyId),
 });
 
+// Mount into an element on your page: <div id="doola"></div>
 document.getElementById('doola')!.append(doola.create());
 ```
 
@@ -137,6 +141,9 @@ To start the connection early, add these to your `<head>`:
 <link rel="preconnect" href="https://js.doola.com" crossorigin />
 <link rel="preconnect" href="https://sdk.doola.com" />
 ```
+
+With test keys or `origin`, point the second hint at your frame host instead, as under
+[Content Security Policy](#content-security-policy).
 
 ## 3. Take payment, then confirm it
 
@@ -161,13 +168,13 @@ checkout starts:
 <!-- example: confirm-payment after session-route -->
 
 ```ts
-// On your server, after the charge succeeds. DOOLA_API and apiKey are as in step 1.
+// On your server, after the charge succeeds. DOOLA_API and doolaKey are as in step 1.
 async function confirmPayment(companyId: string, paymentReference: string): Promise<void> {
   const path = `/v1/partner/companies/${encodeURIComponent(companyId)}/payment-confirmed`;
 
   const r = await fetch(`${DOOLA_API}${path}`, {
     method: 'POST',
-    headers: { authorization: apiKey, 'content-type': 'application/json' },
+    headers: { authorization: doolaKey(), 'content-type': 'application/json' },
     // Your own reference (a payment intent id, an order id). Logged, never verified.
     body: JSON.stringify({ partnerReference: paymentReference }),
   });
@@ -187,20 +194,20 @@ company is formed.
 
 Pass these once, to `loadDoola`. Full definitions with JSDoc ship in the package's types.
 
-| Option             | Required | Description                                                                                                                                                 |
-| ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `publishableKey`   | Yes      | `pk_test_…` or `pk_live_…`. Its prefix selects the environment.                                                                                             |
-| `fetchAccessToken` | Yes      | Returns `{ accessToken, expiresIn }` from your route. On failure, reject with an object carrying the HTTP `status`.                                         |
-| `onAuthError`      | Yes      | A session could not be created or renewed. See [Errors](#errors).                                                                                           |
-| `onFormed`         | Yes      | `({ companyId })` when the customer submits, or asks to pay again. Start your checkout.                                                                     |
-| `onLoadError`      | No       | The component failed to load or run. Useful for your analytics, since the iframe shows its own error screen in most cases.                                  |
-| `onLoaderStart`    | No       | The first time anything (including a loading state) is visible in the iframe.                                                                               |
-| `presentation`     | No       | `{ mode: 'auto' }` (default) switches to a full-screen overlay on narrow screens, so the iOS keyboard never covers an input. `'fullScreen'` always uses it. |
-| `locale`           | No       | BCP 47 tag. `en` only today. Change it later with `doola.update({ locale })`.                                                                               |
-| `origin`           | No       | Serve the app from your own domain through a CNAME. Must be a constant in your code: the session token is posted to this origin.                            |
+| Option             | Required | Description                                                                                                                                                             |
+| ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `publishableKey`   | Yes      | `pk_test_…` or `pk_live_…`. Its prefix selects the environment.                                                                                                         |
+| `fetchAccessToken` | Yes      | Returns `{ accessToken, expiresIn }` from your route. On failure, reject with an object carrying the HTTP `status`.                                                     |
+| `onAuthError`      | Yes      | A session could not be created or renewed. See [Errors](#errors).                                                                                                       |
+| `onFormed`         | Yes      | `({ companyId })` when the customer submits, or asks to pay again. Start your checkout.                                                                                 |
+| `onLoadError`      | No       | The component failed to load or run. Useful for your analytics, since the iframe shows its own error screen in most cases.                                              |
+| `onLoaderStart`    | No       | The first time anything (including a loading state) is visible in the iframe.                                                                                           |
+| `presentation`     | No       | `{ mode: 'auto' }` (default) switches to a full-screen overlay on narrow screens, so the iOS keyboard never covers an input. `{ mode: 'fullScreen' }` always uses it.   |
+| `locale`           | No       | BCP 47 tag. `en` only today. Change it later with `doola.update({ locale })`.                                                                                           |
+| `origin`           | No       | Your own domain for the app, by arrangement: doola adds it to its CDN and issues its certificate first. Keep it a constant: the session token is posted to this origin. |
 
-Your logo, colors and font aren't options. You set them in the partner portal, under **SDK**, then
-**Branding**, and doola applies them inside the iframe, based on your publishable key.
+Your logo, colors and font aren't options. doola applies them inside the iframe, based on your
+publishable key.
 
 ## Errors
 

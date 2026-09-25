@@ -29,6 +29,9 @@ const READMES = readdirSync('packages')
 
 const ROOT = resolve('.');
 const BLOCK = /^(?:<!-- example: ([\w-]+)(?: after ([\w-]+))? -->\n\n?)?```ts\n([\s\S]*?)^```$/gm;
+// Every TypeScript fence, at any indent or spelling, so a block BLOCK misses
+// fails the check instead of shipping unchecked while it stays green.
+const ANY_TS_FENCE = /^[ \t]*(?:```|~~~)[ \t]*(?:ts|tsx|typescript)\b/gim;
 const TSC = createRequire(join(ROOT, 'packages/js/package.json')).resolve('typescript/bin/tsc');
 
 // Outside the repository, like check-packages.mjs, so nothing can end up in a commit.
@@ -41,8 +44,16 @@ const named = new Map();
 try {
   for (const readme of READMES) {
     const text = readFileSync(readme, 'utf8');
+    const blocks = [...text.matchAll(BLOCK)];
+    const fences = text.match(ANY_TS_FENCE)?.length ?? 0;
 
-    for (const match of text.matchAll(BLOCK)) {
+    if (fences !== blocks.length) {
+      throw new Error(
+        `${readme}: ${fences - blocks.length} TypeScript block(s) this check cannot read. Use an unindented \`\`\`ts fence.`,
+      );
+    }
+
+    for (const match of blocks) {
       const [block, name, after, code] = match;
       const fence = match.index + block.indexOf('```ts');
       const firstLine = text.slice(0, fence).split('\n').length + 1;

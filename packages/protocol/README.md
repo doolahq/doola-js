@@ -10,7 +10,7 @@ the validators both sides run against it.
 It exists because the two ends of the bus live in different repositories (the
 loader in `doolahq/doola-js`, the app in `doolahq/doola-sdk-app`), and a wire
 format maintained twice is a wire format that drifts. It is published only so
-the app can install it.
+the app can adopt it.
 
 The specification is
 [`docs/protocol.md`](https://github.com/doolahq/doola-js/blob/main/docs/protocol.md),
