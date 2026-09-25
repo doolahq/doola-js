@@ -23,6 +23,11 @@ const SHIM = join(here, '../../../js/dist/index.js');
  * a slow response intercepts the frame request with `page.route`, so the
  * behaviour sits on the line of the test that wants it rather than in a flag
  * this file has to interpret.
+ *
+ * A page's Content-Security-Policy is the exception: `?csp=` on any URL sends
+ * it as a response header. Fulfilling the page from `page.route` instead makes
+ * Chromium treat the document as public, and Local Network Access then blocks
+ * its frame to 127.0.0.1 before CSP is ever consulted.
  */
 export interface Harness {
   partnerOrigin: string;
@@ -44,16 +49,21 @@ const PARTNER_PAGE = `<!doctype html>
  * A partner that installed `@doola/js`: the built shim, which injects the
  * loader from js.doola.com itself. Nothing here serves that URL, so each test
  * intercepts it and states what the edge returns.
+ *
+ * The page's module is a file, not inline, so a test can serve this page under
+ * a partner's CSP as it is, without an `'unsafe-inline'` the partner would not
+ * send.
  */
 const SHIM_PAGE = `<!doctype html>
 <meta charset="utf-8" />
 <title>partner</title>
 <style>body{margin:0}</style>
 <div id="mount"></div>
-<script type="module">
-  import { loadDoola } from '/shim.js';
-  window.__doola = { loadDoola };
-</script>
+<script type="module" src="/shim-page.js"></script>
+`;
+
+const SHIM_PAGE_MODULE = `import { loadDoola } from '/shim.js';
+window.__doola = { loadDoola };
 `;
 
 /**
@@ -93,12 +103,18 @@ export async function startHarness(): Promise<Harness> {
     '/loader.js': ['text/javascript', bundle],
     '/shim.js': ['text/javascript', readFileSync(SHIM, 'utf8')],
     '/shim': ['text/html', SHIM_PAGE],
+    '/shim-page.js': ['text/javascript', SHIM_PAGE_MODULE],
   };
 
   const partner = createServer((req, res) => {
-    const [type, body] = assets[req.url ?? ''] ?? ['text/html', PARTNER_PAGE];
+    const url = new URL(req.url ?? '/', 'http://partner');
+    const [type, body] = assets[url.pathname] ?? ['text/html', PARTNER_PAGE];
+    const csp = url.searchParams.get('csp');
 
-    res.writeHead(200, { 'content-type': `${type}; charset=utf-8` });
+    res.writeHead(200, {
+      'content-type': `${type}; charset=utf-8`,
+      ...(csp && { 'content-security-policy': csp }),
+    });
     res.end(body);
   });
 

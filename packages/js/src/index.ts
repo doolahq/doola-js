@@ -24,6 +24,46 @@ declare global {
   }
 }
 
+const POLICY_NAME = 'doola-js';
+
+// In the global symbol registry rather than module state because a page can
+// bundle two copies of this shim, and createPolicy throws for a name that
+// already exists. Every copy ever published reads this key, so a loader URL
+// other than LOADER_URL needs a new key and a new policy name.
+const POLICY: unique symbol = Symbol.for('@doola/js trusted types policy');
+
+// lib.dom does not declare Trusted Types. `createScriptURL` returns a
+// TrustedScriptURL, which `src` accepts but lib.dom types as a string only.
+interface ScriptURLPolicy {
+  createScriptURL(url: string): string;
+}
+
+interface TrustedTypesWindow {
+  trustedTypes?: { createPolicy(name: string, rules: ScriptURLPolicy): ScriptURLPolicy };
+  [POLICY]?: ScriptURLPolicy;
+}
+
+function loaderSrc(): string {
+  const w = window as TrustedTypesWindow;
+
+  if (!w.trustedTypes) return LOADER_URL;
+
+  try {
+    w[POLICY] ??= w.trustedTypes.createPolicy(POLICY_NAME, {
+      createScriptURL: (url) => {
+        if (url !== LOADER_URL) throw new TypeError(`${POLICY_NAME} only allows ${LOADER_URL}.`);
+        return url;
+      },
+    });
+    return w[POLICY].createScriptURL(LOADER_URL);
+  } catch {
+    // A page can restrict policy names without enforcing Trusted Types, and
+    // the plain string still loads there. Where they are enforced, assigning
+    // it throws, and the caller reports that.
+    return LOADER_URL;
+  }
+}
+
 let loaderPromise: Promise<DoolaGlobal> | null = null;
 
 function injectLoader(): Promise<DoolaGlobal> {
@@ -36,13 +76,26 @@ function injectLoader(): Promise<DoolaGlobal> {
   }
 
   if (window.Doola) return Promise.resolve(window.Doola);
+  if (loaderPromise) return loaderPromise;
 
   // Never adopt a tag we did not inject: a finished or failed foreign tag
   // fires no listeners. Re-evaluating the loader is safe (CONTRIBUTING.md,
   // "the loader outlives every published contract version").
-  loaderPromise ??= new Promise((resolve, reject) => {
-    const script = document.createElement('script');
+  const script = document.createElement('script');
 
+  // Outside the promise: rejecting from its executor would call fail() before
+  // the assignment below, leaving the rejection cached for every retry.
+  try {
+    script.src = loaderSrc();
+  } catch {
+    return Promise.reject(
+      new Error(
+        `Trusted Types blocked ${LOADER_URL}. Check your CSP allows trusted-types ${POLICY_NAME}.`,
+      ),
+    );
+  }
+
+  loaderPromise = new Promise((resolve, reject) => {
     // Failed tags do not stay in <head>.
     const fail = (error: Error) => {
       script.remove();
@@ -60,7 +113,6 @@ function injectLoader(): Promise<DoolaGlobal> {
       );
     });
 
-    script.src = LOADER_URL;
     script.async = true;
     // Without this an uncaught error inside the loader reaches the partner's
     // own window.onerror as the opaque "Script error." with no file, line or
