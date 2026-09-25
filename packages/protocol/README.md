@@ -1,15 +1,20 @@
 # @doola/sdk-protocol
 
+> **Internal to doola. Partners do not use this package.** To embed doola, install
+> [`@doola/js`](https://www.npmjs.com/package/@doola/js). This package carries no
+> compatibility promise for anyone outside doola's own loader and app.
+
 The wire format doola's SDK loader and embedded app speak to each other, and
 the validators both sides run against it.
 
-**Partners do not use this package.** It exists because the two ends of the bus
-live in different repositories — the loader in this one, the app in
-`doolahq/doola-sdk-app` — and a wire format maintained twice is a wire format
-that drifts. The partner-facing contract is [`@doola/js`](../js).
+It exists because the two ends of the bus live in different repositories (the
+loader in `doolahq/doola-js`, the app in `doolahq/doola-sdk-app`), and a wire
+format maintained twice is a wire format that drifts. It is published only so
+the app can adopt it.
 
-The specification is [`docs/protocol.md`](../../docs/protocol.md), and it is
-authoritative: this package is one implementation of it.
+The specification is
+[`docs/protocol.md`](https://github.com/doolahq/doola-js/blob/main/docs/protocol.md),
+and it is authoritative: this package is one implementation of it.
 `test/spec-matches-docs.test.ts` fails if the two stop describing the same
 messages or the same version.
 

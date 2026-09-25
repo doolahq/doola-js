@@ -8,6 +8,18 @@
     "url": "https://github.com/doolahq/doola-js.git",
     "directory": "packages/js"
   },
+  "homepage": "https://github.com/doolahq/doola-js/tree/main/packages/js#readme",
+  "keywords": [
+    "doola",
+    "sdk",
+    "embedded",
+    "company-formation",
+    "llc",
+    "c-corp",
+    "ein",
+    "iframe",
+    "white-label"
+  ],
   "type": "module",
   "types": "./src/index.ts",
   "sideEffects": false,

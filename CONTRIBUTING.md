@@ -60,6 +60,12 @@ the API change. It does not show the `Window.Doola` global augmentation in
   published version, and how the loader bundle reaches js.doola.com, is
   [`docs/releasing.md`](docs/releasing.md).
 - `pnpm typecheck` and `pnpm format:check` must pass; CI enforces both.
+  `typecheck` also compiles every ` ```ts ` block in the published READMEs
+  (`pnpm check:readme`), because partners copy them verbatim. Names an example
+  leaves to the partner, such as their auth, are declared in
+  `scripts/readme-examples.d.ts`. A block that builds on an earlier one says so
+  in a comment above its fence (`<!-- example: payment after session-route -->`),
+  so it is compiled against that block rather than against a shared global.
 - Node and pnpm versions are pinned in `package.json` (`engines` / `packageManager`) and `.nvmrc` — those are the source of truth, not this file.
 
 ## Testing the loader
