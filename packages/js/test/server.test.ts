@@ -31,10 +31,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function respondWith(response: Response | Promise<Response>) {
-  fetchMock.mockReturnValue(Promise.resolve(response));
-}
-
 function handler(getCustomer: () => DoolaCustomer | null = () => CUSTOMER, apiKey = LIVE_KEY) {
   return createSessionHandler({ apiKey, getCustomer });
 }
@@ -87,7 +83,7 @@ describe('createSessionHandler', () => {
 
       const responses = [];
       for (const doola of [Response.json(MINTED), new Response(null, { status: 401 })]) {
-        respondWith(doola);
+        fetchMock.mockResolvedValue(doola);
         responses.push(await (await call()).text());
       }
 
@@ -141,7 +137,7 @@ describe('createSessionHandler', () => {
   });
 
   it('unwraps the envelope and forwards only accessToken and expiresIn', async () => {
-    respondWith(
+    fetchMock.mockResolvedValue(
       Response.json({ ...MINTED, payload: { ...MINTED.payload, customerId: 'c_1' }, extra: 1 }),
     );
 
@@ -153,7 +149,7 @@ describe('createSessionHandler', () => {
   });
 
   it("rewrites doola's 401 to a 502, so the loader never reads it as partner_session_expired", async () => {
-    respondWith(
+    fetchMock.mockResolvedValue(
       Response.json(
         { payload: null, error: { code: 'E_AUTH_INVALID', message: 'authorization is invalid' } },
         { status: 401 },
@@ -169,7 +165,7 @@ describe('createSessionHandler', () => {
   it.each([400, 403, 404, 409, 429, 500, 503])(
     "passes doola's %i through without its body",
     async (status) => {
-      respondWith(
+      fetchMock.mockResolvedValue(
         Response.json({ payload: null, error: { code: 'E', message: 'doola says' } }, { status }),
       );
 
@@ -200,7 +196,7 @@ describe('createSessionHandler', () => {
       () => Response.json({ payload: { accessToken: 'cs_live_abc', expiresIn: '600' } }),
     ],
   ])('answers 502 when a 2xx carries %s', async (_, response) => {
-    respondWith(response());
+    fetchMock.mockResolvedValue(response());
 
     const answer = await call();
 
@@ -228,10 +224,10 @@ describe('createCustomerSession', () => {
   });
 
   it.each([
-    ["doola's 401", 502, () => respondWith(new Response(null, { status: 401 }))],
-    ["doola's 409", 409, () => respondWith(new Response(null, { status: 409 }))],
+    ["doola's 401", 502, () => fetchMock.mockResolvedValue(new Response(null, { status: 401 }))],
+    ["doola's 409", 409, () => fetchMock.mockResolvedValue(new Response(null, { status: 409 }))],
     ['a network failure', 502, () => fetchMock.mockRejectedValue(new TypeError('fetch failed'))],
-    ['a non-JSON body', 502, () => respondWith(new Response('nope'))],
+    ['a non-JSON body', 502, () => fetchMock.mockResolvedValue(new Response('nope'))],
   ])('maps %s to %i with no body', async (_, status, arrange) => {
     arrange();
 

@@ -116,14 +116,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // doola wraps every response in { payload, error }. The payload also carries
 // expiresAt, which the loader never reads, so it stays on the server.
 async function readSession(response: Response): Promise<CustomerSessionResult['body']> {
-  let envelope: unknown;
-
-  try {
-    envelope = await response.json();
-  } catch {
-    return null;
-  }
-
+  const envelope: unknown = await response.json().catch(() => null);
   const payload = isRecord(envelope) ? envelope.payload : undefined;
 
   if (
@@ -153,14 +146,19 @@ async function mint(
     return BAD_GATEWAY;
   }
 
-  // doola's 401 means the key or tenant is wrong, not the customer's session.
-  // The loader reads any 401 as partner_session_expired, so passing it on would
-  // send a signed-in customer to the partner's login, on every renewal.
-  if (response.status === 401) return BAD_GATEWAY;
+  if (!response.ok) {
+    // An unread body keeps undici's socket out of the pool until GC.
+    await response.body?.cancel();
 
-  // Every other status passes through, so doola's 409 reaches the loader as
-  // email_in_use, and a status doola adds later needs no change here.
-  if (!response.ok) return { status: response.status, body: null };
+    // doola's 401 means the key or tenant is wrong, not the customer's session.
+    // The loader reads any 401 as partner_session_expired, so passing it on would
+    // send a signed-in customer to the partner's login, on every renewal.
+    if (response.status === 401) return BAD_GATEWAY;
+
+    // Every other status passes through, so doola's 409 reaches the loader as
+    // email_in_use, and a status doola adds later needs no change here.
+    return { status: response.status, body: null };
+  }
 
   const body = await readSession(response);
 
