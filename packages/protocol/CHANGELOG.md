@@ -1,5 +1,11 @@
 # @doola/sdk-protocol
 
+## 0.1.1
+
+### Patch Changes
+
+- a582a43: The npm page and description now say up front that this package is internal to doola, and point partners to `@doola/js`.
+
 ## 0.1.0
 
 ### Minor Changes

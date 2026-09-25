@@ -1,6 +1,6 @@
 {
   "name": "@doola/sdk-protocol",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Internal to doola: the wire format between doola's SDK loader and embedded app. Partners use @doola/js.",
   "license": "MIT",
   "repository": {
