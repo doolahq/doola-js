@@ -307,6 +307,16 @@ With test keys, the frame comes from `https://sdk.test.doola.com`, and with `ori
 domain. Nothing else is needed: the session request goes to your own route, and the loader sets
 its styles through the CSSOM, which `style-src` does not restrict.
 
+If your CSP enforces Trusted Types (`require-trusted-types-for 'script'`), also allow the
+`doola-js` policy. If you already send a `trusted-types` directive, add `doola-js` to its list:
+
+```text
+trusted-types doola-js;
+```
+
+The policy accepts only the loader URL, and the loader writes to no other Trusted Types sink. If
+the name is not allowed, `loadDoola()` rejects with a message naming this directive.
+
 ## Frameworks and SSR
 
 `loadDoola()` runs in the browser only. On the server it rejects, so call it from a client-only
