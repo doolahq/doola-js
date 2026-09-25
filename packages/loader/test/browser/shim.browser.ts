@@ -15,6 +15,7 @@ test.afterAll(async () => {
 
 const LOADER_URL = 'https://js.doola.com/v1/doola.js';
 const CSP_HINT = `Failed to load ${LOADER_URL}. Check your CSP allows script-src js.doola.com.`;
+const TRUSTED_TYPES_HINT = `Trusted Types blocked ${LOADER_URL}. Check your CSP allows trusted-types doola-js.`;
 
 type Loaded = { loaded: true } | { loaded: false; message: string };
 
@@ -23,6 +24,7 @@ interface ShimWindow extends Window {
   __doola: { loadDoola: typeof loadDoola };
   __instance: Doola;
   __adoptedKey: string;
+  __violations: string[];
 }
 
 /** What js.doola.com serves in production: the built loader, readable from any origin. */
@@ -30,8 +32,10 @@ function edge(route: Route, headers = { 'access-control-allow-origin': '*' }): P
   return route.fulfill({ contentType: 'text/javascript', headers, body: harness.loaderBundle });
 }
 
-async function openShimPage(page: Page): Promise<void> {
-  await page.goto(`${harness.partnerOrigin}/shim`);
+async function openShimPage(page: Page, csp?: string): Promise<void> {
+  const query = csp ? `?csp=${encodeURIComponent(csp)}` : '';
+
+  await page.goto(`${harness.partnerOrigin}/shim${query}`);
 }
 
 function load(page: Page): Promise<Loaded> {
@@ -176,4 +180,137 @@ test('the loader does not run unless the edge allows this page to read it', asyn
 
   expect(await load(page)).toEqual({ loaded: false, message: CSP_HINT });
   expect(await loaderTags(page)).toHaveLength(0);
+});
+
+/** The policy PENG-6810 was reproduced under, with the harness app as the frame origin. */
+function enforcingTrustedTypes(allowedPolicies: string): string {
+  return [
+    "script-src 'self' https://js.doola.com",
+    `frame-src ${harness.sdkOrigin}`,
+    "require-trusted-types-for 'script'",
+    `trusted-types ${allowedPolicies}`,
+  ].join('; ');
+}
+
+function recordViolations(page: Page): Promise<void> {
+  return page.evaluate(() => {
+    const w = window as unknown as ShimWindow;
+    w.__violations = [];
+    addEventListener('securitypolicyviolation', (event) => {
+      w.__violations.push(event.effectiveDirective);
+    });
+  });
+}
+
+function violations(page: Page): Promise<string[]> {
+  return page.evaluate(() => (window as unknown as ShimWindow).__violations);
+}
+
+const viewports = {
+  inline: { width: 1024, height: 768 },
+  'full-screen': { width: 375, height: 812 },
+};
+
+for (const [mode, viewport] of Object.entries(viewports)) {
+  test(`under enforced Trusted Types, the ${mode} frame mounts and is destroyed without a violation`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await page.route(LOADER_URL, (route) => edge(route));
+    await openShimPage(page, enforcingTrustedTypes('doola-js'));
+    await recordViolations(page);
+
+    expect(await load(page)).toEqual({ loaded: true });
+    expect(await loaderTags(page)).toEqual([{ async: true, crossOrigin: 'anonymous' }]);
+
+    await page.evaluate(() => {
+      const w = window as unknown as ShimWindow;
+      document.getElementById('mount')?.appendChild(w.__instance.create());
+    });
+
+    await expect(page.locator('#mount doola-embed iframe')).toHaveCount(1);
+    await navigatedFrame(page, harness.sdkOrigin);
+    expect(
+      await page.evaluate(() => document.querySelector('iframe')?.style.position === 'fixed'),
+    ).toBe(mode === 'full-screen');
+
+    await page.evaluate(() => (window as unknown as ShimWindow).__instance.destroy());
+    await expect(page.locator('#mount doola-embed iframe')).toHaveCount(0);
+
+    // The loader writes to no Trusted Types sink; this is what keeps it that way.
+    expect(await violations(page)).toEqual([]);
+  });
+}
+
+test('under enforced Trusted Types that do not allow doola-js, loadDoola names the directive', async ({
+  page,
+}) => {
+  let fetched = 0;
+  await page.route(LOADER_URL, (route) => {
+    fetched += 1;
+    return edge(route);
+  });
+  await openShimPage(page, enforcingTrustedTypes('partner-policy'));
+  await recordViolations(page);
+
+  expect(await load(page)).toEqual({ loaded: false, message: TRUSTED_TYPES_HINT });
+  expect(await load(page)).toEqual({ loaded: false, message: TRUSTED_TYPES_HINT });
+  expect(await loaderTags(page)).toHaveLength(0);
+  expect(fetched).toBe(0);
+
+  // One pair per call: the refused policy name, then the plain-string
+  // fallback. A cached rejection would return the same message with only one
+  // pair. This list is also what makes the empty ones above mean something.
+  await expect
+    .poll(() => violations(page))
+    .toEqual([
+      'trusted-types',
+      'require-trusted-types-for',
+      'trusted-types',
+      'require-trusted-types-for',
+    ]);
+});
+
+test('a page that restricts policy names without enforcing Trusted Types still loads', async ({
+  page,
+}) => {
+  await page.route(LOADER_URL, (route) => edge(route));
+  await openShimPage(page, 'trusted-types partner-policy');
+
+  expect(await load(page)).toEqual({ loaded: true });
+  expect(await loaderTags(page)).toHaveLength(1);
+});
+
+test("a second bundled copy of the shim reuses the first copy's policy", async ({ page }) => {
+  await page.route(LOADER_URL, (route) => edge(route));
+  await openShimPage(page, enforcingTrustedTypes('doola-js'));
+
+  const results = await page.evaluate(async (sdkOrigin) => {
+    const w = window as unknown as ShimWindow;
+    // A different URL is a different module instance, with its own
+    // loaderPromise, which is what a second bundled copy is.
+    const secondCopy = '/shim.js?copy=2';
+    const second = (await import(secondCopy)) as ShimWindow['__doola'];
+    const options = {
+      publishableKey: 'pk_test_harness',
+      origin: sdkOrigin,
+      fetchAccessToken: () => Promise.resolve({ accessToken: 'cs_harness', expiresIn: 3600 }),
+      onAuthError: () => {},
+      onFormed: () => {},
+    };
+
+    // In one task, so neither copy can see the other's window.Doola and each
+    // injects its own tag.
+    return Promise.all(
+      [w.__doola.loadDoola, second.loadDoola].map((loadDoola) =>
+        loadDoola(options).then(
+          () => 'loaded',
+          (error: Error) => error.message,
+        ),
+      ),
+    );
+  }, harness.sdkOrigin);
+
+  expect(results).toEqual(['loaded', 'loaded']);
+  expect(await loaderTags(page)).toHaveLength(2);
 });
