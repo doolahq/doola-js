@@ -52,7 +52,8 @@ export interface CustomerSessionFailure {
    * - `doola_unauthorized`: doola answered 401, so the key is wrong, revoked or
    *   for another environment. The route answers 502.
    * - `doola_error`: any other non-2xx from doola, passed through as is.
-   * - `doola_unreachable`: the request failed or timed out. The route answers 502.
+   * - `doola_unreachable`: the request failed, or timed out before a 2xx body
+   *   had arrived. The route answers 502.
    * - `invalid_response`: a 2xx without a usable session. The route answers 502.
    */
   reason: 'doola_unauthorized' | 'doola_error' | 'doola_unreachable' | 'invalid_response';
@@ -94,8 +95,12 @@ export interface SessionHandlerOptions {
    */
   getCustomer: (request: Request) => DoolaCustomer | null | Promise<DoolaCustomer | null>;
 
-  /** Called with the reason whenever a session could not be minted, for your logs. */
-  onFailure?: ((failure: CustomerSessionFailure) => void) | undefined;
+  /**
+   * Called with the reason whenever a session could not be minted, for your
+   * logs. Awaited before the route answers, so an error from it, sync or async,
+   * rejects the request rather than going unhandled.
+   */
+  onFailure?: ((failure: CustomerSessionFailure) => void | Promise<void>) | undefined;
 }
 
 interface Credentials {
@@ -194,6 +199,7 @@ async function mint(
   { apiKey, apiOrigin }: Credentials,
   customer: DoolaCustomer,
 ): Promise<CustomerSessionResult> {
+  const signal = AbortSignal.timeout(MINT_TIMEOUT_MS);
   let response: Response;
 
   try {
@@ -201,7 +207,7 @@ async function mint(
       method: 'POST',
       headers: { authorization: apiKey, 'content-type': 'application/json' },
       body: mintRequestBody(customer),
-      signal: AbortSignal.timeout(MINT_TIMEOUT_MS),
+      signal,
     });
   } catch {
     return failed(502, { reason: 'doola_unreachable' });
@@ -227,7 +233,13 @@ async function mint(
 
   const body = sessionFrom(envelope);
 
-  return body ? { status: 200, body } : failed(502, { reason: 'invalid_response', doolaStatus });
+  if (body) return { status: 200, body };
+
+  // The timeout also covers the body, and readEnvelope swallows the abort, so a
+  // session cut off mid-body is doola being slow, not doola sending garbage.
+  const reason = signal.aborted ? 'doola_unreachable' : 'invalid_response';
+
+  return failed(502, { reason, doolaStatus });
 }
 
 // RFC 6749 section 5.1: a response carrying a token must not be cached.
@@ -279,7 +291,7 @@ export function createSessionHandler(
 
     const { status, body, failure } = await mint(resolved, customer);
 
-    if (failure) onFailure?.(failure);
+    if (failure) await onFailure?.(failure);
 
     return respond(status, body);
   };

@@ -295,6 +295,55 @@ describe('createSessionHandler', () => {
     expect(onFailure).not.toHaveBeenCalled();
   });
 
+  it('rejects the request when an async onFailure rejects, rather than leaving it unhandled', async () => {
+    fetchMock.mockResolvedValue(doolaError(401));
+
+    const route = handler(undefined, LIVE_KEY, async () => {
+      throw new Error('log sink down');
+    });
+
+    await expect(call(route)).rejects.toThrow('log sink down');
+  });
+
+  it('answers only once an async onFailure has settled', async () => {
+    fetchMock.mockResolvedValue(doolaError(401));
+    const order: string[] = [];
+
+    const route = handler(undefined, LIVE_KEY, async () => {
+      await new Promise((resolve) => setTimeout(resolve));
+      order.push('onFailure');
+    });
+
+    await call(route).then(() => order.push('response'));
+
+    expect(order).toEqual(['onFailure', 'response']);
+  });
+
+  it('reports a 2xx body cut off by the timeout as doola_unreachable, not invalid_response', async () => {
+    const timeout = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
+    fetchMock.mockImplementation(async (_, init) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) {
+          stream.enqueue(new TextEncoder().encode('{"payload":'));
+          init?.signal?.addEventListener('abort', () => stream.error(init.signal?.reason));
+        },
+      });
+      setTimeout(() => timeout.abort(new DOMException('timed out', 'TimeoutError')));
+
+      return new Response(body, { status: 200 });
+    });
+    const onFailure = vi.fn();
+
+    const response = await call(handler(undefined, LIVE_KEY, onFailure));
+
+    expect(response.status).toBe(502);
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith({
+      reason: 'doola_unreachable',
+      doolaStatus: 200,
+    });
+  });
+
   it('lets a failure in getCustomer propagate to the framework', async () => {
     const route = handler(() => {
       throw new Error('auth backend down');

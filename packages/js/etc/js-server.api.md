@@ -47,7 +47,7 @@ export interface DoolaCustomer {
 export interface SessionHandlerOptions {
     apiKey: string | undefined;
     getCustomer: (request: Request) => DoolaCustomer | null | Promise<DoolaCustomer | null>;
-    onFailure?: ((failure: CustomerSessionFailure) => void) | undefined;
+    onFailure?: ((failure: CustomerSessionFailure) => void | Promise<void>) | undefined;
 }
 
 // (No @packageDocumentation comment for this package)

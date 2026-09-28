@@ -70,8 +70,8 @@ where `process.env` needs the `nodejs_compat` flag.
 import { createSessionHandler } from '@doola/js/server';
 
 export const POST = createSessionHandler({
-  // Your dk_ secret key. Its prefix selects the API host. It is read per request, so
-  // `next build` passes without it, and a pk_ key throws here.
+  // Your dk_ secret key. Its prefix selects the API host. A missing key is refused per
+  // request, so `next build` passes without it, and a pk_ key throws here.
   apiKey: process.env.DOOLA_API_KEY,
 
   // Return null when nobody is signed in. The route answers 401, and the loader reports
