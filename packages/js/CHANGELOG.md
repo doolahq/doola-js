@@ -1,5 +1,16 @@
 # @doola/js
 
+## 0.2.0
+
+### Minor Changes
+
+- 19e03a6: New `@doola/js/server` entry with `createSessionHandler` and `createCustomerSession`, which build the session route from step 1 of the guide. They pick the API host from your secret key, rewrite doola's 401 to a 502 so a signed-in customer is never sent to your login, forward only `accessToken` and `expiresIn`, and tell your logs why a session could not be minted through `onFailure`. Server only, with no dependencies, on Node 18 or later and any runtime with the web-standard `fetch`. The browser entry is unchanged.
+
+### Patch Changes
+
+- a582a43: The npm page now carries the full integration guide: keys and environments, the session route, mounting, the payment handoff, options, errors, Content Security Policy, browser support and lifecycle. Every TypeScript example in it is type-checked in CI.
+- a3ebcee: `loadDoola()` now works on pages that enforce Trusted Types. The shim creates a `doola-js` policy that accepts only the loader URL, so allow it with `trusted-types doola-js`. Where the name is not allowed, `loadDoola()` rejects with a message naming that directive instead of the browser's `TrustedScriptURL` error. Pages without Trusted Types are unaffected.
+
 ## 0.1.2
 
 ### Patch Changes

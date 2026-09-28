@@ -1,6 +1,6 @@
 {
   "name": "@doola/js",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Loader, TypeScript types and a server session helper for embedding doola formation in your product.",
   "license": "MIT",
   "repository": {
