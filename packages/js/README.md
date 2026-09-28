@@ -70,7 +70,8 @@ where `process.env` needs the `nodejs_compat` flag.
 import { createSessionHandler } from '@doola/js/server';
 
 export const POST = createSessionHandler({
-  // Your dk_ secret key. Its prefix selects the API host, and a missing key throws here.
+  // Your dk_ secret key. Its prefix selects the API host. It is read per request, so
+  // `next build` passes without it, and a pk_ key throws here.
   apiKey: process.env.DOOLA_API_KEY,
 
   // Return null when nobody is signed in. The route answers 401, and the loader reports
@@ -81,6 +82,10 @@ export const POST = createSessionHandler({
     // customer who changes their email with you stays the same doola customer.
     return user ? { email: user.email, externalCustomerId: user.id } : null;
   },
+
+  // The browser only gets the status. This says why: a revoked key, an outage, or a field
+  // doola rejected, with doola's error code.
+  onFailure: (failure) => console.error('doola session failed', failure),
 });
 ```
 
@@ -93,20 +98,29 @@ send:
 ```ts
 import { createCustomerSession } from '@doola/js/server';
 
-app.post('/doola-session', async (req, res) => {
-  const user = await getSignedInUser(req); // your own auth
-  if (!user) {
-    res.status(401).end();
-    return;
+app.post('/doola-session', async (req, res, next) => {
+  try {
+    const user = await getSignedInUser(req); // your own auth
+    if (!user) {
+      res.status(401).end();
+      return;
+    }
+
+    const { status, body, failure } = await createCustomerSession({
+      apiKey: process.env.DOOLA_API_KEY,
+      customer: { email: user.email, externalCustomerId: user.id },
+    });
+
+    if (failure) console.error('doola session failed', failure);
+
+    res.set('Cache-Control', 'no-store');
+    if (body) res.status(status).json(body);
+    else res.status(status).end();
+  } catch (error) {
+    // A missing or invalid key rejects. Express 4 does not catch a rejected handler, so without
+    // this the process crashes.
+    next(error);
   }
-
-  const { status, body } = await createCustomerSession({
-    apiKey: process.env.DOOLA_API_KEY,
-    customer: { email: user.email, externalCustomerId: user.id },
-  });
-
-  if (body) res.status(status).json(body);
-  else res.status(status).end();
 });
 ```
 
@@ -123,6 +137,7 @@ whole `Authorization` header, with no `Bearer` prefix. Then keep the rules the h
 - **Unwrap the response.** doola wraps every response in `{ payload, error }`. Send the browser
   only `accessToken` and `expiresIn` from the payload, never the whole body.
 - **A failure to reach doola is a 502 too**, as is a response that is not JSON.
+- **Send the session with `Cache-Control: no-store`**, as for any token response.
 
 <!-- example: session-route-http -->
 
@@ -143,16 +158,27 @@ export async function POST(request: Request): Promise<Response> {
   const user = await getSignedInUser(request); // your own auth
   if (!user) return new Response(null, { status: 401 });
 
-  const r = await fetch(`${DOOLA_API}/v1/partner/customer-sessions`, {
-    method: 'POST',
-    headers: { authorization: doolaKey(), 'content-type': 'application/json' },
-    body: JSON.stringify({ email: user.email, externalCustomerId: user.id }),
-  });
+  let r: Response;
+  try {
+    r = await fetch(`${DOOLA_API}/v1/partner/customer-sessions`, {
+      method: 'POST',
+      headers: { authorization: doolaKey(), 'content-type': 'application/json' },
+      body: JSON.stringify({ email: user.email, externalCustomerId: user.id }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return new Response(null, { status: 502 });
+  }
 
   if (!r.ok) return new Response(null, { status: r.status === 401 ? 502 : r.status });
 
-  const { payload } = await r.json();
-  return Response.json({ accessToken: payload.accessToken, expiresIn: payload.expiresIn });
+  const { payload } = await r.json().catch(() => ({ payload: null }));
+  if (!payload?.accessToken) return new Response(null, { status: 502 });
+
+  return Response.json(
+    { accessToken: payload.accessToken, expiresIn: payload.expiresIn },
+    { headers: { 'cache-control': 'no-store' } },
+  );
 }
 ```
 
@@ -225,11 +251,19 @@ checkout starts:
    [Confirm payment](https://docs.doola.com/api/api-reference/companies/confirm-payment-for-a-draft-formation).
    Nothing is filed until you do:
 
-<!-- example: confirm-payment after session-route-http -->
+<!-- example: confirm-payment -->
 
 ```ts
-// On your server, after the charge succeeds. DOOLA_API and doolaKey are as in the plain HTTP
-// route in step 1.
+// On your server, after the charge succeeds.
+const DOOLA_API = 'https://api.doola.com'; // https://api.test.doola.com with a dk_test_ key
+
+function doolaKey(): string {
+  const key = process.env.DOOLA_API_KEY; // your dk_ secret key
+  if (!key) throw new Error('DOOLA_API_KEY is not set');
+
+  return key;
+}
+
 async function confirmPayment(companyId: string, paymentReference: string): Promise<void> {
   const path = `/v1/partner/companies/${encodeURIComponent(companyId)}/payment-confirmed`;
 

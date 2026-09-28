@@ -6,11 +6,15 @@ declare const process: { env: Record<string, string | undefined> };
 // Just enough of Express for the example that adapts the session route to it.
 interface ExpressResponse {
   status(code: number): ExpressResponse;
+  set(field: string, value: string): ExpressResponse;
   json(body: unknown): void;
   end(): void;
 }
 declare const app: {
-  post(path: string, handler: (req: unknown, res: ExpressResponse) => Promise<void>): void;
+  post(
+    path: string,
+    handler: (req: unknown, res: ExpressResponse, next: (error?: unknown) => void) => Promise<void>,
+  ): void;
 };
 
 declare function getSignedInUser(request: unknown): Promise<{ id: string; email: string } | null>;

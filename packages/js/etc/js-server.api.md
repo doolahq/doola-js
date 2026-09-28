@@ -10,41 +10,44 @@ export function createCustomerSession(options: CustomerSessionOptions): Promise<
 // @public
 export function createSessionHandler(options: SessionHandlerOptions): (request: Request) => Promise<Response>;
 
-// @public (undocumented)
+// @public
+export interface CustomerSessionFailure {
+    doolaCode?: string;
+    doolaStatus?: number;
+    reason: 'doola_unauthorized' | 'doola_error' | 'doola_unreachable' | 'invalid_response';
+}
+
+// @public
 export interface CustomerSessionOptions {
     apiKey: string | undefined;
-    // (undocumented)
     customer: DoolaCustomer;
 }
 
 // @public
 export interface CustomerSessionResult {
-    // (undocumented)
     body: {
         accessToken: string;
         expiresIn: number;
     } | null;
-    // (undocumented)
+    failure?: CustomerSessionFailure;
     status: number;
 }
 
 // @public
 export interface DoolaCustomer {
     countryOfResidence?: string | undefined;
-    // (undocumented)
     email: string;
     externalCustomerId?: string | undefined;
-    // (undocumented)
     firstName?: string | undefined;
-    // (undocumented)
     lastName?: string | undefined;
     phoneNumber?: string | undefined;
 }
 
-// @public (undocumented)
+// @public
 export interface SessionHandlerOptions {
     apiKey: string | undefined;
     getCustomer: (request: Request) => DoolaCustomer | null | Promise<DoolaCustomer | null>;
+    onFailure?: ((failure: CustomerSessionFailure) => void) | undefined;
 }
 
 // (No @packageDocumentation comment for this package)

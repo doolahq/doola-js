@@ -6,6 +6,7 @@ import {
   createSessionHandler,
   type CustomerSessionResult,
   type DoolaCustomer,
+  type SessionHandlerOptions,
 } from '../src/server';
 
 const LIVE_KEY = 'dk_live_s3cr3tv4lu3';
@@ -20,6 +21,10 @@ const MINTED = {
 
 const fetchMock = vi.fn<typeof fetch>();
 
+function doolaError(status: number, code = 'E'): Response {
+  return Response.json({ payload: null, error: { code, message: 'doola says' } }, { status });
+}
+
 beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => Response.json(MINTED));
@@ -31,8 +36,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function handler(getCustomer: () => DoolaCustomer | null = () => CUSTOMER, apiKey = LIVE_KEY) {
-  return createSessionHandler({ apiKey, getCustomer });
+function handler(
+  getCustomer: () => DoolaCustomer | null = () => CUSTOMER,
+  apiKey: string | undefined = LIVE_KEY,
+  onFailure?: SessionHandlerOptions['onFailure'],
+) {
+  return createSessionHandler({ apiKey, getCustomer, onFailure });
 }
 
 function call(route = handler()) {
@@ -46,14 +55,13 @@ function sentRequest() {
     method: init?.method,
     headers: new Headers(init?.headers),
     body: JSON.parse(String(init?.body)) as unknown,
+    signal: init?.signal,
   };
 }
 
 describe('createSessionHandler', () => {
   describe('apiKey', () => {
     it.each([
-      ['missing', undefined, /apiKey is missing/],
-      ['empty', '', /apiKey is missing/],
       ['a live publishable key', 'pk_live_s3cr3tv4lu3', /publishable pk_ key/],
       ['a test publishable key', 'pk_test_s3cr3tv4lu3', /publishable pk_ key/],
       ['not a doola key', 'sk_live_s3cr3tv4lu3', /Expected dk_live_ or dk_test_/],
@@ -65,6 +73,17 @@ describe('createSessionHandler', () => {
       expect(create).not.toThrow(/s3cr3tv4lu3/);
       expect(fetchMock).not.toHaveBeenCalled();
     });
+
+    // `next build` evaluates route modules, often without the secret set.
+    it.each([undefined, ''])(
+      'is refused per request, not at construction, when %j',
+      async (apiKey) => {
+        const route = createSessionHandler({ apiKey, getCustomer: () => CUSTOMER });
+
+        await expect(call(route)).rejects.toThrow(/apiKey is missing/);
+        expect(fetchMock).not.toHaveBeenCalled();
+      },
+    );
 
     it('selects the API host from the key prefix', async () => {
       await call(handler(undefined, LIVE_KEY));
@@ -148,6 +167,24 @@ describe('createSessionHandler', () => {
     expect(await response.json()).toStrictEqual({ accessToken: 'cs_live_abc', expiresIn: 600 });
   });
 
+  it.each([
+    ['a session', () => Response.json(MINTED)],
+    ['a failure', () => new Response(null, { status: 401 })],
+  ])('marks %s no-store, as RFC 6749 requires of token responses', async (_, doola) => {
+    fetchMock.mockResolvedValue(doola());
+
+    expect((await call()).headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('gives up on doola after 10 seconds, as a 502', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    fetchMock.mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+
+    expect((await call()).status).toBe(502);
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    expect(sentRequest().signal).toBe(timeout.mock.results[0]?.value);
+  });
+
   it("rewrites doola's 401 to a 502, so the loader never reads it as partner_session_expired", async () => {
     fetchMock.mockResolvedValue(
       Response.json(
@@ -195,6 +232,15 @@ describe('createSessionHandler', () => {
       'a payload with a string expiresIn',
       () => Response.json({ payload: { accessToken: 'cs_live_abc', expiresIn: '600' } }),
     ],
+    ['an empty accessToken', () => Response.json({ payload: { accessToken: '', expiresIn: 600 } })],
+    [
+      'a zero expiresIn',
+      () => Response.json({ payload: { accessToken: 'cs_live_abc', expiresIn: 0 } }),
+    ],
+    [
+      'a negative expiresIn',
+      () => Response.json({ payload: { accessToken: 'cs_live_abc', expiresIn: -5 } }),
+    ],
   ])('answers 502 when a 2xx carries %s', async (_, response) => {
     fetchMock.mockResolvedValue(response());
 
@@ -202,6 +248,51 @@ describe('createSessionHandler', () => {
 
     expect(answer.status).toBe(502);
     expect(await answer.text()).toBe('');
+  });
+
+  it.each([
+    [
+      "doola's 401",
+      () => fetchMock.mockResolvedValue(doolaError(401, 'E_AUTH_INVALID')),
+      { reason: 'doola_unauthorized', doolaStatus: 401, doolaCode: 'E_AUTH_INVALID' },
+    ],
+    [
+      "doola's 400",
+      () => fetchMock.mockResolvedValue(doolaError(400, 'E_VALIDATION_FAILED')),
+      { reason: 'doola_error', doolaStatus: 400, doolaCode: 'E_VALIDATION_FAILED' },
+    ],
+    [
+      'an error without an envelope',
+      () => fetchMock.mockResolvedValue(new Response('<html>', { status: 503 })),
+      { reason: 'doola_error', doolaStatus: 503 },
+    ],
+    [
+      'a network failure',
+      () => fetchMock.mockRejectedValue(new TypeError('fetch failed')),
+      { reason: 'doola_unreachable' },
+    ],
+    [
+      'a malformed 200',
+      () => fetchMock.mockResolvedValue(Response.json({ payload: null })),
+      { reason: 'invalid_response', doolaStatus: 200 },
+    ],
+  ])('tells onFailure about %s, and the browser only the status', async (_, arrange, failure) => {
+    arrange();
+    const onFailure = vi.fn();
+
+    const response = await call(handler(undefined, LIVE_KEY, onFailure));
+
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith(failure);
+    expect(await response.text()).toBe('');
+  });
+
+  it('does not call onFailure for a session, or for a customer who is signed out', async () => {
+    const onFailure = vi.fn();
+
+    await call(handler(undefined, LIVE_KEY, onFailure));
+    await call(handler(() => null, LIVE_KEY, onFailure));
+
+    expect(onFailure).not.toHaveBeenCalled();
   });
 
   it('lets a failure in getCustomer propagate to the framework', async () => {
@@ -224,17 +315,44 @@ describe('createCustomerSession', () => {
   });
 
   it.each([
-    ["doola's 401", 502, () => fetchMock.mockResolvedValue(new Response(null, { status: 401 }))],
-    ["doola's 409", 409, () => fetchMock.mockResolvedValue(new Response(null, { status: 409 }))],
-    ['a network failure', 502, () => fetchMock.mockRejectedValue(new TypeError('fetch failed'))],
-    ['a non-JSON body', 502, () => fetchMock.mockResolvedValue(new Response('nope'))],
-  ])('maps %s to %i with no body', async (_, status, arrange) => {
+    ["doola's 401", 502, 'doola_unauthorized', () => fetchMock.mockResolvedValue(doolaError(401))],
+    ["doola's 409", 409, 'doola_error', () => fetchMock.mockResolvedValue(doolaError(409))],
+    [
+      'a network failure',
+      502,
+      'doola_unreachable',
+      () => fetchMock.mockRejectedValue(new TypeError('fetch failed')),
+    ],
+    [
+      'a non-JSON body',
+      502,
+      'invalid_response',
+      () => fetchMock.mockResolvedValue(new Response('nope')),
+    ],
+  ])('maps %s to %i with no body', async (_, status, reason, arrange) => {
     arrange();
 
-    await expect(createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER })).resolves.toEqual({
-      status,
-      body: null,
-    });
+    await expect(
+      createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER }),
+    ).resolves.toMatchObject({ status, body: null, failure: { reason } });
+  });
+
+  it('returns a new result for every failure, so one caller cannot change the next', async () => {
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+
+    const first = await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER });
+    first.status = 503;
+    const second = await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER });
+
+    expect(second).not.toBe(first);
+    expect(second.status).toBe(502);
+  });
+
+  it.each([undefined, ''])('rejects a missing apiKey, %j', async (apiKey) => {
+    await expect(createCustomerSession({ apiKey, customer: CUSTOMER })).rejects.toThrow(
+      /apiKey is missing/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid apiKey without echoing it', async () => {
