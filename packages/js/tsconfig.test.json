@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Same reason as packages/loader/tsconfig.test.json, which carries it in
+    // full: vitest's bundled .d.ts chain does not compile under the base.
+    "skipLibCheck": true
+  },
+  "include": ["src", "test"]
+}

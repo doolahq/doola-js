@@ -87,6 +87,7 @@ try {
         moduleDetection: 'force',
         paths: {
           '@doola/js': [join(ROOT, 'packages/js/src/index.ts')],
+          '@doola/js/server': [join(ROOT, 'packages/js/src/server.ts')],
           '@doola/sdk-protocol': [join(ROOT, 'packages/protocol/src/index.ts')],
         },
       },
