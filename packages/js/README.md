@@ -32,10 +32,10 @@ screen, field and validation lives inside that iframe:
 You need two keys. The publishable key selects the environment for the browser, and the secret
 key does the same on your server.
 
-| Key         | Prefix                   | Where it lives                                  | How to get it                                                                               |
-| ----------- | ------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Publishable | `pk_test_` or `pk_live_` | Your frontend. Public by design.                | Issued by doola with your SDK access. It identifies you and selects your branding.          |
-| Secret      | `dk_test_` or `dk_live_` | Your server only. Never in a browser or bundle. | [Partner portal](https://partners-portal.doola.com), under **Settings**, then **API Keys**. |
+| Key         | Prefix                   | Where it lives                                  | How to get it                                                                                                                                                  |
+| ----------- | ------------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Publishable | `pk_test_` or `pk_live_` | Your frontend. Public by design.                | [Partner portal](https://partners-portal.doola.com), under **SDK**, then **Install**, once your SDK access is on. It identifies you and selects your branding. |
+| Secret      | `dk_test_` or `dk_live_` | Your server only. Never in a browser or bundle. | [Partner portal](https://partners-portal.doola.com), under **Settings**, then **API Keys**.                                                                    |
 
 Test and live are separate stacks with separate data. Use a matching pair:
 
@@ -301,8 +301,8 @@ Pass these once, to `loadDoola`. Full definitions with JSDoc ship in the package
 | `locale`           | No       | BCP 47 tag. `en` only today. Change it later with `doola.update({ locale })`.                                                                                           |
 | `origin`           | No       | Your own domain for the app, by arrangement: doola adds it to its CDN and issues its certificate first. Keep it a constant: the session token is posted to this origin. |
 
-Your logo, colors and font aren't options. doola applies them inside the iframe, based on your
-publishable key.
+Your logo, colors and font aren't options. You set them in the partner portal, under **SDK**,
+then **Branding**, and doola applies them inside the iframe, based on your publishable key.
 
 ## Errors
 
