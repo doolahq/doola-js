@@ -1,5 +1,11 @@
 # @doola/js
 
+## 0.2.1
+
+### Patch Changes
+
+- 6434e35: The guide now says where your publishable key and branding live: the partner portal's **SDK** section, under **Install** and **Branding**.
+
 ## 0.2.0
 
 ### Minor Changes
