@@ -28,7 +28,8 @@ it is installed anywhere within a loader URL major — owned by CONTRIBUTING.md.
 Everywhere this document says "the SDK origin", it means the value the loader
 resolved for this instance — from the publishable key's environment, or from the
 `origin` option for CNAME partners (both defined in the contract) — never a
-hardcoded host.
+hardcoded host. For the preview peer it is the origin of the `/preview` URL the
+portal framed (see "The preview peer").
 
 ## Envelope
 
@@ -43,10 +44,10 @@ payload does not match its `payload` column below: each side validates what it
 receives before acting on it, and drops what fails exactly like an unknown type.
 For `ready` that means a malformed handshake leaves the frame without `init`, which
 is deliberate — a peer that cannot form a valid `ready` is not handed a session.
-Version negotiation happens once,
+Between the loader and the app, version negotiation happens once,
 up front, in the `ready`/`init` handshake: `ready` carries the app's
 `protocolMax`, `init` replies with the `protocol` both sides then speak —
-`min(loaderMax, appMax)`. There is no other downgrade mechanism.
+`min(loaderMax, appMax)`. There is no other downgrade mechanism between them.
 
 `v` is therefore the version a message is **spoken in**, not the sender's
 maximum: once `init` has settled it, every later message from either side
@@ -54,7 +55,10 @@ carries the negotiated value. This is what makes the receive rule coherent —
 each side drops anything whose `v` is above its own maximum, which would
 otherwise reject its peer's traffic immediately after a successful downgrade.
 Before `init` only `ready` exists, and it carries the app's maximum because
-that is the number being negotiated with.
+that is the number being negotiated with. The preview peer has no `init`: there
+`update` and `resize` flow without one, the portal picks the version of each
+`update`, no higher than the `protocolMax` that `ready` announced, and the
+preview answers in the latest one it accepted (see "The preview peer").
 
 A receiver drops a message whose `v` is above its own maximum, and equally one
 below the oldest version it still supports. Both ends of that window are part of
@@ -71,7 +75,9 @@ half-understood.
     attributes a message to the right frame.
   - `event.origin` equals the SDK origin.
 - The **app** accepts messages only from the partner origin `init` arrived from,
-  and posts back to exactly that origin.
+  and posts back to exactly that origin. The preview document, which never
+  receives `init`, locks onto the origin of its first valid `update` instead
+  (see "The preview peer").
 - `"*"` as a target origin is forbidden, with one rule-shaped carve-out: a
   message MAY target `"*"` only when it is sent before the peer origin is
   knowable AND carries no session, token, or customer data. `ready` is
@@ -99,13 +105,15 @@ half-understood.
 
 ## Messages: mounting peer → app
 
-The mounting peer is the loader — or the portal's branding preview, see below.
+The mounting peer is the loader. The portal's branding preview frames a
+different document and speaks a subset of these messages; see "The preview
+peer".
 
 | type           | payload                                                      | since | notes                                                                                                                                                                                                                                                            |
 | -------------- | ------------------------------------------------------------ | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `init`         | `{ session, appearance?, locale?, protocol, presentation? }` | 1     | first message after `ready`; `appearance` is sent by internal peers only; `presentation` is the frame's mode at handshake time, absent only from a loader older than the field                                                                                   |
+| `init`         | `{ session, appearance?, locale?, protocol, presentation? }` | 1     | first message after `ready`; `appearance` is parsed and ignored, see below; `presentation` is the frame's mode at handshake time, absent only from a loader older than the field                                                                                 |
 | `token`        | `{ session }`                                                | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                |
-| `update`       | `{ appearance?, locale? }`                                   | 1     | runtime `update()` call — see below; `appearance` internal peers only                                                                                                                                                                                            |
+| `update`       | `{ appearance?, locale?, preview? }`                         | 1     | runtime `update()` call, see below; `appearance` and `preview` are read only by the preview peer, see "The preview peer"                                                                                                                                         |
 | `token-error`  | `{ reason, message, retryable }`                             | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type; `retryable` means the loader will keep renewing on its own — the frame may still send `token-request` in either case, for terminal reasons only after the user has acted outside the frame |
 | `presentation` | `{ mode }`                                                   | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                  |
 
@@ -115,7 +123,8 @@ clears) are applied by the loader against the state it holds, and the app
 replaces its values wholesale with what arrives. The app never merges.
 
 **`init` is the complete state snapshot; every other loader→app message is a
-delta.** That is the rule, and it is why nothing is lost when the loader posts
+delta.** (The preview peer has no `init`, so there every `update` is complete;
+see below.) That is the rule, and it is why nothing is lost when the loader posts
 before the frame can receive: `init` re-reads the session, the locale and the
 presentation mode at handshake time, so a dropped `token` or `presentation` is
 superseded rather than missed. Any future loader→app message carrying state
@@ -133,11 +142,73 @@ An app that ignores the field renders inline until the first transition.
 
 `appearance` on `init` and `update` is a doola-internal channel, not a partner
 option — branding lives in the partner portal, and the public `update()` carries
-only `locale`. Its consumer is the portal's branding preview, which mounts the app
-the way a loader does and speaks this protocol unchanged: `ready`, `init`, then
-`update { appearance }` for each unsaved draft. It adds no message types — the
+only `locale`. Its consumer is the portal's branding preview, which does not
+mount the app: it frames the session-less preview document and sends
+`update { appearance, preview }` for each unsaved draft (below). The app still
+parses `appearance` on `init` and `update`, so a peer that sends it is not
+refused, but ignores it: the saved config is its only source of branding. No
+message type was added for any of this: the
 `branding_preview` message in earlier sketches is `update { appearance }`. The
 shape of `appearance` is owned by the branding backend (PENG-6219).
+
+## The preview peer
+
+The partner portal's branding preview (PENG-6500) shows a partner their unsaved
+branding on the real screens. It cannot mount the app the way a loader does: the
+app waits for `init`, `init` needs a customer session, and minting one takes a
+`dk_` key the portal never holds. So the SDK origin serves a second document for
+it at `/preview` (doola-sdk-app `preview.html`, PENG-6816), which renders the
+formation wizard's own screens on sample data and holds no session at all. It speaks a subset of
+this protocol:
+
+- **Preview → portal**: `ready`, exactly as the app sends it (the same inline
+  script, the same `"*"` carve-out), then `resize`. Nothing else: no
+  `loader-start`, no `formed`, no `token-request`, and no `scroll-request`.
+  After Continue, Back or Edit the preview focuses the new step's heading
+  instead; where the browser lets a framed document's focus scroll its parent
+  (Chromium and Firefox do), that brings the step into the portal's view.
+- **Portal → preview**: `update` alone, `{ appearance?, preview? }`. `init`,
+  `token`, `token-error` and `presentation` are dropped like an unknown type, so
+  a session sent to this document by mistake is never applied or stored. (The
+  inline script buffers whatever arrives before the bundle runs, as it does for
+  the app, and the bundle then drops it.)
+- **Origin and source.** The preview accepts messages only from the window that
+  framed it (`event.source === window.parent`). The first valid `update` locks
+  the origin: from then on the preview hears only that origin, and posts
+  `resize` only to it. Before the lock it posts nothing after `ready`, and a
+  dropped message locks nothing. So until its first `update` is accepted it
+  reports no height, and the portal gives the frame a placeholder height, as the
+  loader does.
+- **What the portal accepts.** The loader's rule, held by the portal: it acts on
+  `ready` and `resize` only when `event.source` is the `contentWindow` of the
+  preview frame it created and `event.origin` is the SDK origin, and it posts
+  `update` to the SDK origin.
+- **Version.** There is no `init` to negotiate one. The portal replies to
+  `ready` with an `update` at a version no higher than the `protocolMax` that
+  `ready` announced (and, by the receive rule above, no lower than the oldest
+  the preview still supports), and the preview answers at the version of the
+  latest `update` it accepted. The portal answers every `ready`, not only the
+  first: a frame whose bundle runs after the inline script has stopped
+  buffering announces again.
+- **Every `update` is the complete state**, because there is no `init` to carry
+  it: the portal sends its whole draft each time, and the preview replaces what
+  it shows wholesale. No `appearance` means doola's own palette; no `preview`
+  means `onboarding`.
+- **`preview` names the surface**: `onboarding` (the formation wizard) or
+  `dashboard`. Any other string is shown as `onboarding` rather than failing the
+  message, so a portal that learns a surface before the app does still repaints
+  the branding. A value that is not a string is a malformed payload, and the
+  whole `update` is dropped with it, branding included. The field is additive:
+  an app or loader that does not know it ignores it, which is why it needed no
+  version bump.
+- **No network.** The preview never calls the SDK API, the saved
+  `GET /v1/sdk/branding` included, since that would mask the unsaved draft. Its
+  only requests are its own static assets and the image `appearance.logoUrl`
+  names.
+
+The URL is `https://sdk.test.doola.com/preview`, and `https://sdk.doola.com/preview`
+once production is live. Its `ready` is the app's, byte for byte; the portal
+knows which document it framed.
 
 ## Token renewal
 
