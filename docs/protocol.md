@@ -111,9 +111,9 @@ peer".
 
 | type           | payload                                                      | since | notes                                                                                                                                                                                                                                                            |
 | -------------- | ------------------------------------------------------------ | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `init`         | `{ session, appearance?, locale?, protocol, presentation? }` | 1     | first message after `ready`; `appearance` is sent by internal peers only; `presentation` is the frame's mode at handshake time, absent only from a loader older than the field                                                                                   |
+| `init`         | `{ session, appearance?, locale?, protocol, presentation? }` | 1     | first message after `ready`; `appearance` is parsed and ignored, see below; `presentation` is the frame's mode at handshake time, absent only from a loader older than the field                                                                                 |
 | `token`        | `{ session }`                                                | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                |
-| `update`       | `{ appearance?, locale?, preview? }`                         | 1     | runtime `update()` call, see below; `appearance` internal peers only; `preview` the portal preview only, see "The preview peer"                                                                                                                                  |
+| `update`       | `{ appearance?, locale?, preview? }`                         | 1     | runtime `update()` call, see below; `appearance` and `preview` are read only by the preview peer, see "The preview peer"                                                                                                                                         |
 | `token-error`  | `{ reason, message, retryable }`                             | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type; `retryable` means the loader will keep renewing on its own — the frame may still send `token-request` in either case, for terminal reasons only after the user has acted outside the frame |
 | `presentation` | `{ mode }`                                                   | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                  |
 
@@ -145,8 +145,9 @@ option — branding lives in the partner portal, and the public `update()` carri
 only `locale`. Its consumer is the portal's branding preview, which does not
 mount the app: it frames the session-less preview document and sends
 `update { appearance, preview }` for each unsaved draft (below). The app still
-accepts `appearance` on `init` and `update`, ahead of the saved config, but no
-peer sends it there today. No message type was added for any of this: the
+parses `appearance` on `init` and `update`, so a peer that sends it is not
+refused, but ignores it: the saved config is its only source of branding. No
+message type was added for any of this: the
 `branding_preview` message in earlier sketches is `update { appearance }`. The
 shape of `appearance` is owned by the branding backend (PENG-6219).
 
@@ -185,10 +186,10 @@ this protocol:
 - **Version.** There is no `init` to negotiate one. The portal replies to
   `ready` with an `update` at a version no higher than the `protocolMax` that
   `ready` announced (and, by the receive rule above, no lower than the oldest
-  the app still supports), and the preview answers at the version of the latest
-  `update` it accepted. The
-  portal answers every `ready`, not only the first: a frame whose bundle runs
-  after the inline script has stopped buffering announces again.
+  the preview still supports), and the preview answers at the version of the
+  latest `update` it accepted. The portal answers every `ready`, not only the
+  first: a frame whose bundle runs after the inline script has stopped
+  buffering announces again.
 - **Every `update` is the complete state**, because there is no `init` to carry
   it: the portal sends its whole draft each time, and the preview replaces what
   it shows wholesale. No `appearance` means doola's own palette; no `preview`
