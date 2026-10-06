@@ -81,17 +81,20 @@ export type FetchAccessToken = () => Promise<CustomerSession>;
  * succeeds. doola answers 409 for each, so they are told apart by the
  * rejection's `code` (see {@link FetchAccessToken}).
  *
- * - `email_in_use`: the customer's email already belongs to a doola
- *   account outside the partner's tenant (`E_EMAIL_IN_USE`). Also any
+ * - `email_in_use`: the email the route sent cannot be this customer's
+ *   (`E_EMAIL_IN_USE`): it belongs to a doola account outside the
+ *   partner's tenant, or to another account it would be renamed onto. Also any
  *   first-mint 409 whose rejection carries no `code`, from a route that
  *   forwards only the status; the frame then shows its generic failure,
  *   since the email may not be the cause. First mint only: on renewal a
  *   409 with this code or none is `renewal_failed`. The expected response
  *   is a support path or a different email.
- * - `external_id_conflict`: the `externalCustomerId` the route sent
- *   conflicts with doola's record (`E_RESOURCE_CONFLICT`): the customer is
- *   bound to a different one, or this one is bound to another customer.
- *   A bug in the partner's mapping, not the customer's to fix.
+ * - `external_id_conflict`: doola could not bind the customer to what the
+ *   route sent (`E_RESOURCE_CONFLICT`). Usually the `externalCustomerId`:
+ *   the customer is bound to a different one, or this one is bound to
+ *   another customer. Also a customer from before doola's accounts were
+ *   unified, which cannot take a new email. Not the customer's to fix:
+ *   check the mapping, or ask doola support.
  * - `customer_revoked`: doola deactivated this customer
  *   (`E_CUSTOMER_REVOKED`). The expected response is a support path.
  *
