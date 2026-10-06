@@ -19,6 +19,9 @@ screen, field and validation lives inside that iframe:
 - **You never redeploy for our changes.** State requirements, IRS forms and UI improvements ship
   inside the iframe. This package pins the shape of the call, never the behavior behind it.
 
+**Full documentation: [docs.doola.com/sdk](https://docs.doola.com/sdk/overview).** This page is
+the short version: install, the three steps, and where to read more.
+
 ## How it fits together
 
 1. **Your server** mints a short-lived session for the signed-in customer, using your secret key.
@@ -32,10 +35,10 @@ screen, field and validation lives inside that iframe:
 You need two keys. The publishable key selects the environment for the browser, and the secret
 key does the same on your server.
 
-| Key         | Prefix                   | Where it lives                                  | How to get it                                                                                                                                                  |
-| ----------- | ------------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Publishable | `pk_test_` or `pk_live_` | Your frontend. Public by design.                | [Partner portal](https://partners-portal.doola.com), under **SDK**, then **Install**, once your SDK access is on. It identifies you and selects your branding. |
-| Secret      | `dk_test_` or `dk_live_` | Your server only. Never in a browser or bundle. | [Partner portal](https://partners-portal.doola.com), under **Settings**, then **API Keys**.                                                                    |
+| Key         | Prefix                   | Where it lives                                  | How to get it                                                                                                                      |
+| ----------- | ------------------------ | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Publishable | `pk_test_` or `pk_live_` | Your frontend. Public by design.                | [Partner portal](https://partners-portal.doola.com), under **SDK**, then **Install**. It identifies you and selects your branding. |
+| Secret      | `dk_test_` or `dk_live_` | Your server only. Never in a browser or bundle. | [Partner portal](https://partners-portal.doola.com), under **Settings**, then **API Keys**.                                        |
 
 Test and live are separate stacks with separate data. Use a matching pair:
 
@@ -89,104 +92,11 @@ export const POST = createSessionHandler({
 });
 ```
 
-The customer can also carry `firstName`, `lastName`, `countryOfResidence` and `phoneNumber`,
-which doola uses only when it creates the customer.
-
-For Express, Fastify or your own routing, `createCustomerSession` returns the status and body to
-send:
-
-```ts
-import { createCustomerSession } from '@doola/js/server';
-
-app.post('/doola-session', async (req, res, next) => {
-  try {
-    const user = await getSignedInUser(req); // your own auth
-    if (!user) {
-      res.status(401).end();
-      return;
-    }
-
-    const { status, body, failure } = await createCustomerSession({
-      apiKey: process.env.DOOLA_API_KEY,
-      customer: { email: user.email, externalCustomerId: user.id },
-    });
-
-    if (failure) console.error('doola session failed', failure);
-
-    res.set('Cache-Control', 'no-store');
-    if (body) res.status(status).json(body);
-    else res.status(status).end();
-  } catch (error) {
-    // A missing or invalid key rejects. Express 4 does not catch a rejected handler, so without
-    // this the process crashes.
-    next(error);
-  }
-});
-```
-
-<details>
-<summary>Not on JavaScript? The same route over plain HTTP</summary>
-
-From any other language, call `POST /v1/partner/customer-sessions` with your secret key as the
-whole `Authorization` header, with no `Bearer` prefix. Then keep the rules the helper owns:
-
-- **doola's 401 becomes a 502.** It means your key or tenant is wrong, not the customer's session.
-  Passed on, the loader would read it as `partner_session_expired` and send a signed-in customer to
-  your login page. Every other status passes through, so doola's 409 still reaches the loader as
-  `email_in_use`.
-- **Unwrap the response.** doola wraps every response in `{ payload, error }`. Send the browser
-  only `accessToken` and `expiresIn` from the payload, never the whole body.
-- **A failure to reach doola is a 502 too**, as is a response that is not JSON.
-- **Send the session with `Cache-Control: no-store`**, as for any token response.
-
-<!-- example: session-route-http -->
-
-```ts
-// POST /doola-session
-const DOOLA_API = 'https://api.doola.com'; // https://api.test.doola.com with a dk_test_ key
-
-// Read per request, never at import: Next.js runs this module during `next build`, where your
-// secret is often not set.
-function doolaKey(): string {
-  const key = process.env.DOOLA_API_KEY; // your dk_ secret key
-  if (!key) throw new Error('DOOLA_API_KEY is not set');
-
-  return key;
-}
-
-export async function POST(request: Request): Promise<Response> {
-  const user = await getSignedInUser(request); // your own auth
-  if (!user) return new Response(null, { status: 401 });
-
-  let r: Response;
-  try {
-    r = await fetch(`${DOOLA_API}/v1/partner/customer-sessions`, {
-      method: 'POST',
-      headers: { authorization: doolaKey(), 'content-type': 'application/json' },
-      body: JSON.stringify({ email: user.email, externalCustomerId: user.id }),
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch {
-    return new Response(null, { status: 502 });
-  }
-
-  if (!r.ok) return new Response(null, { status: r.status === 401 ? 502 : r.status });
-
-  const { payload } = await r.json().catch(() => ({ payload: null }));
-  if (!payload?.accessToken) return new Response(null, { status: 502 });
-
-  return Response.json(
-    { accessToken: payload.accessToken, expiresIn: payload.expiresIn },
-    { headers: { 'cache-control': 'no-store' } },
-  );
-}
-```
-
-</details>
-
 The token acts as that one customer and expires in minutes. The loader calls your route again to
 renew it, so a doola session never outlives your own login. Protect the route like any other
 authenticated `POST`, including your CSRF protection.
+
+Express, Fastify and other languages: [Create sessions](https://docs.doola.com/sdk/sessions).
 
 ## 2. Mount in the browser
 
@@ -215,21 +125,15 @@ const doola = await loadDoola({
 });
 
 // Mount into an element on your page: <div id="doola"></div>
-document.getElementById('doola')!.append(doola.create());
+const element = doola.create();
+document.getElementById('doola')!.append(element);
 ```
 
 `create()` takes no arguments. The app decides what to show from the customer's state: the wizard
 for a new customer, their company once one exists.
 
-To start the connection early, add these to your `<head>`:
-
-```html
-<link rel="preconnect" href="https://js.doola.com" crossorigin />
-<link rel="preconnect" href="https://sdk.doola.com" />
-```
-
-With test keys or `origin`, point the second hint at your frame host instead, as under
-[Content Security Policy](#content-security-policy).
+Keep one instance per page: options are fixed by the first `loadDoola()` call. Frameworks,
+sign-out and the full-screen mode on phones: [Embed the SDK](https://docs.doola.com/sdk/embed).
 
 ## 3. Take payment, then confirm it
 
@@ -280,105 +184,30 @@ async function confirmPayment(companyId: string, paymentReference: string): Prom
 ```
 
 `onFormed` can fire again for the same company, for example when a founder comes back to an unpaid
-formation and asks to pay. Key your orders by `companyId` so you never charge twice. The iframe
-shows a waiting screen until your confirmation arrives. After that, the
-`company_formation_completed` [webhook](https://docs.doola.com/api/webhooks) tells you when the
-company is formed.
+formation and asks to pay. Key your orders by `companyId` so you never charge twice.
 
-## Options
+After you confirm, replace the element you mounted in step 2: `element.replaceWith(doola.create())`.
+Its payment screen does not watch for your confirmation, so only a new element shows the founder
+their company. Each `create()` is a separate iframe, so never append a second one beside the old.
+From then on, the Partner API's [webhooks](https://docs.doola.com/api/webhooks) tell you how the
+formation is going.
 
-Pass these once, to `loadDoola`. Full definitions with JSDoc ship in the package's types.
+Edge cases, refunds and reconciliation: [Take payment](https://docs.doola.com/sdk/payments).
 
-| Option             | Required | Description                                                                                                                                                             |
-| ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `publishableKey`   | Yes      | `pk_test_…` or `pk_live_…`. Its prefix selects the environment.                                                                                                         |
-| `fetchAccessToken` | Yes      | Returns `{ accessToken, expiresIn }` from your route. On failure, reject with an object carrying the HTTP `status`.                                                     |
-| `onAuthError`      | Yes      | A session could not be created or renewed. See [Errors](#errors).                                                                                                       |
-| `onFormed`         | Yes      | `({ companyId })` when the customer submits, or asks to pay again. Start your checkout.                                                                                 |
-| `onLoadError`      | No       | The component failed to load or run. Useful for your analytics, since the iframe shows its own error screen in most cases.                                              |
-| `onLoaderStart`    | No       | The first time anything (including a loading state) is visible in the iframe.                                                                                           |
-| `presentation`     | No       | `{ mode: 'auto' }` (default) switches to a full-screen overlay on narrow screens, so the iOS keyboard never covers an input. `{ mode: 'fullScreen' }` always uses it.   |
-| `locale`           | No       | BCP 47 tag. `en` only today. Change it later with `doola.update({ locale })`.                                                                                           |
-| `origin`           | No       | Your own domain for the app, by arrangement: doola adds it to its CDN and issues its certificate first. Keep it a constant: the session token is posted to this origin. |
+## Documentation
 
-Your logo, colors and font aren't options. You set them in the partner portal, under **SDK**,
-then **Branding**, and doola applies them inside the iframe, based on your publishable key.
-
-## Errors
-
-**`loadDoola()` rejects** when it cannot start. Handle this with your own fallback UI:
-
-- Not running in a browser (see [Frameworks and SSR](#frameworks-and-ssr)).
-- The loader could not load: a Content Security Policy, an ad blocker or the network.
-- An invalid option, such as a key that is not `pk_test_…` or `pk_live_…`. The message says which.
-
-**`onAuthError`** receives one of four types:
-
-| `type`                    | What happened                                                                         | What to do                                                |
-| ------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `partner_session_expired` | Your route returned 401: your own user's session has ended.                           | Redirect to your login. Retrying cannot succeed.          |
-| `email_in_use`            | Your route returned doola's 409: this email belongs to a doola account outside yours. | Offer a support path or a different email. Never retried. |
-| `mint_failed`             | The first session fetch failed for another reason, such as a 5xx or the network.      | Show your error state. Mounting again fetches again.      |
-| `renewal_failed`          | A renewal failed for a reason other than 401. The current session keeps working.      | Usually nothing.                                          |
-
-**`onLoadError`** reports `api_connection_error`, `authentication_error`,
-`invalid_request_error`, `render_error` or `api_error`. The iframe renders its own error screen,
-except for a frame that never started (a 404, a CSP refusal, a blocked request). In that case
-`render_error` is the only signal, and your page is the only place to tell the customer.
-
-Full playbook: [docs/errors.md](https://github.com/doolahq/doola-js/blob/main/docs/errors.md).
-
-## Content Security Policy
-
-If your site sends a CSP, allow the loader script and the iframe:
-
-```text
-script-src https://js.doola.com;
-frame-src https://sdk.doola.com;
-```
-
-With test keys, the frame comes from `https://sdk.test.doola.com`, and with `origin` from your own
-domain. Nothing else is needed: the session request goes to your own route, and the loader sets
-its styles through the CSSOM, which `style-src` does not restrict.
-
-If your CSP enforces Trusted Types (`require-trusted-types-for 'script'`), also allow the
-`doola-js` policy. If you already send a `trusted-types` directive, add `doola-js` to its list:
-
-```text
-trusted-types doola-js;
-```
-
-The policy accepts only the loader URL, and the loader writes to no other Trusted Types sink. If
-the name is not allowed, `loadDoola()` rejects with a message naming this directive.
-
-## Frameworks and SSR
-
-`loadDoola()` runs in the browser only. On the server it rejects, so call it from a client-only
-path: `useEffect`, `onMounted`, a `'use client'` component or a dynamic import.
-
-- **One instance per page.** Calling `loadDoola()` again with the same key returns the live
-  instance, so React StrictMode's double invoke is safe. A different key rejects until you call
-  `destroy()`.
-- **Mounting.** `create()` returns a `<doola-embed>` element. Append it to mount it and remove it
-  to unmount it. It is a block element: full width, with its height following the content.
-- **Logout.** Call `doola.destroy()` when your user logs out, and never on an ordinary unmount or
-  route change. It ends the session and every component, and the instance cannot be reused. To
-  embed again, call `loadDoola()` again.
-
-## Browser support
-
-The embedded app needs Chrome or Edge 111+, Firefox 128+, or Safari 16.4+ (iOS 16.4+). It keeps
-the session in memory and needs no third-party cookies, so it works in browsers that block them.
-
-## Security
-
-- Your secret `dk_` key belongs on your server only. The loader refuses anything that is not a
-  publishable key, and `@doola/js/server` refuses a publishable one.
-- Treat `companyId` like any id from a browser: check it on your server before you charge.
-- Keep `origin` a constant. Never derive it from a URL parameter or user input.
-- Report vulnerabilities privately, as described in
-  [SECURITY.md](https://github.com/doolahq/doola-js/blob/main/SECURITY.md). Never in a public
-  issue.
+| Read                                                            | For                                                      |
+| --------------------------------------------------------------- | -------------------------------------------------------- |
+| [Quickstart](https://docs.doola.com/sdk/quickstart)             | A working embed and a test payment in about 15 minutes   |
+| [How it works](https://docs.doola.com/sdk/how-it-works)         | Keys, sessions and the formation lifecycle               |
+| [Take payment](https://docs.doola.com/sdk/payments)             | Your checkout, the confirmation call and every edge case |
+| [Client reference](https://docs.doola.com/sdk/reference/client) | Every option, method and callback                        |
+| [Server reference](https://docs.doola.com/sdk/reference/server) | `@doola/js/server` and the Partner API endpoints you use |
+| [Errors](https://docs.doola.com/sdk/reference/errors)           | `onAuthError`, `onLoadError` and what to do about each   |
+| [Security and data](https://docs.doola.com/sdk/security)        | Content Security Policy, Trusted Types and data flows    |
+| [Testing](https://docs.doola.com/sdk/testing)                   | The test environment and the sandbox playground          |
+| [Go-live checklist](https://docs.doola.com/sdk/go-live)         | Everything to check before live keys                     |
+| [Partner API](https://docs.doola.com/api/introduction)          | Webhooks, documents and required actions after payment   |
 
 ## Versioning
 
@@ -387,13 +216,13 @@ the session in memory and needs no third-party cookies, so it works in browsers 
 release. The loader at `js.doola.com/v1` updates in place and stays compatible with every
 `@doola/js` release in that major, so fixes reach your site without an upgrade or a deploy.
 
-## Links
+## Support and security
 
-- [Partner API documentation](https://docs.doola.com/api/introduction): authentication, companies
-  and webhooks
-- [Test environment and sandbox](https://docs.doola.com/api/sandbox-playground)
-- [Support](https://github.com/doolahq/doola-js/blob/main/SUPPORT.md)
-- [Source and issues](https://github.com/doolahq/doola-js)
+- Questions: [engineering@doola.com](mailto:engineering@doola.com), or see
+  [SUPPORT.md](https://github.com/doolahq/doola-js/blob/main/SUPPORT.md).
+- Report vulnerabilities privately, as described in
+  [SECURITY.md](https://github.com/doolahq/doola-js/blob/main/SECURITY.md). Never in a public
+  issue.
 
 ## License
 
