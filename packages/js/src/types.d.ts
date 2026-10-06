@@ -47,8 +47,12 @@ export interface CustomerSession {
  * session can never outlive the partner login that created it.
  *
  * On failure, reject with an object exposing the HTTP `status` the
- * partner's route observed —
- * `throw Object.assign(new Error('doola session'), { status: r.status })`.
+ * partner's route observed, and the `code` from its JSON body when it
+ * sent one:
+ * `throw Object.assign(new Error('doola session'), { status: r.status, code })`.
+ * `code` is doola's `error.code`, which the route forwards as `{ code }`
+ * (`@doola/js/server` does): doola answers 409 for several reasons, and
+ * the code is the only thing that tells them apart.
  * The route itself must never flatten a failure to 200, and must never
  * forward doola's own 401: that status means the partner's key or
  * tenant, not the customer's session, and the loader reads any 401 as
@@ -73,14 +77,29 @@ export type FetchAccessToken = () => Promise<CustomerSession>;
  * product. The expected response is redirecting the user to the
  * partner's own login.
  *
- * `email_in_use` is the other terminal case: the customer's email
- * already belongs to a doola account outside the partner's tenant (the
- * broker's 409 `E_EMAIL_IN_USE`). First mint only, never on renewal, and
- * retrying never succeeds — the expected response is a support path or a
- * different email.
+ * The 409 cases are terminal too, and each needs the rejection's `code`
+ * (see {@link FetchAccessToken}); a 409 without a recognised one is
+ * `mint_failed` or `renewal_failed`. Retrying never succeeds.
+ *
+ * - `email_in_use`: the customer's email already belongs to a doola
+ *   account outside the partner's tenant (`E_EMAIL_IN_USE`). First mint
+ *   only: on renewal the same code is `renewal_failed`. The expected
+ *   response is a support path or a different email.
+ * - `external_id_conflict`: the `externalCustomerId` the route sent
+ *   conflicts with doola's record (`E_RESOURCE_CONFLICT`): the customer is
+ *   bound to a different one, or this one is bound to another customer.
+ *   A bug in the partner's mapping, not the customer's to fix.
+ * - `customer_revoked`: doola deactivated this customer
+ *   (`E_CUSTOMER_REVOKED`). The expected response is a support path.
  */
 export interface DoolaAuthError {
-  type: 'partner_session_expired' | 'email_in_use' | 'mint_failed' | 'renewal_failed';
+  type:
+    | 'partner_session_expired'
+    | 'email_in_use'
+    | 'external_id_conflict'
+    | 'customer_revoked'
+    | 'mint_failed'
+    | 'renewal_failed';
   message: string;
 }
 

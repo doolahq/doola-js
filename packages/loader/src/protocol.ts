@@ -61,6 +61,8 @@ export type Envelope = LoaderMessage & { v: number };
 const RETRYABLE: Record<DoolaAuthError['type'], boolean> = {
   partner_session_expired: false,
   email_in_use: false,
+  external_id_conflict: false,
+  customer_revoked: false,
   mint_failed: true,
   renewal_failed: true,
 };

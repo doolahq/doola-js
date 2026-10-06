@@ -22,22 +22,40 @@ interface ActiveSession {
 }
 
 /**
+ * doola answers 409 for several reasons, so a 409 is named by the `code` the
+ * rejection carries (FetchAccessToken docs). A Map, not an object: the code is
+ * partner-supplied, and an object lookup would resolve `constructor` and
+ * `__proto__`.
+ */
+const CONFLICTS: ReadonlyMap<unknown, DoolaAuthError['type']> = new Map([
+  ['E_EMAIL_IN_USE', 'email_in_use'],
+  ['E_RESOURCE_CONFLICT', 'external_id_conflict'],
+  ['E_CUSTOMER_REVOKED', 'customer_revoked'],
+] as const);
+
+/**
  * The status→type mapping the loader owns (docs/protocol.md). The public
  * contract (FetchAccessToken docs) asks partners to reject with an object
- * exposing the HTTP `status` — throwing the fetch Response satisfies it.
+ * exposing the HTTP `status`, and the `code` their route forwarded.
  * This is the implementer of that published rule.
  */
-function classifyRejection(
-  error: unknown,
-  fallback: DoolaAuthError['type'],
-): DoolaAuthError['type'] {
-  const status =
-    typeof error === 'object' && error !== null ? (error as { status?: unknown }).status : null;
+function classifyRejection(error: unknown, renewal: boolean): DoolaAuthError['type'] {
+  const { status, code } =
+    typeof error === 'object' && error !== null
+      ? (error as { status?: unknown; code?: unknown })
+      : {};
+  const fallback = renewal ? 'renewal_failed' : 'mint_failed';
 
   if (status === 401) return 'partner_session_expired';
-  if (status === 409) return 'email_in_use';
+  if (status !== 409) return fallback;
 
-  return fallback;
+  const conflict = CONFLICTS.get(code);
+
+  // The contract promises email_in_use on the first mint only. Mid-session the
+  // frame keeps working until the token expires, which renewal_failed says.
+  if (conflict === 'email_in_use' && renewal) return fallback;
+
+  return conflict ?? fallback;
 }
 
 /**
@@ -120,17 +138,17 @@ export class SessionManager {
     // Whether a failure is a mint or a renewal is session state, not the
     // caller's business (docs/protocol.md step 4): once any session has
     // existed, every re-fetch is a renewal.
-    const fallback: DoolaAuthError['type'] = this.active ? 'renewal_failed' : 'mint_failed';
+    const renewal = this.active !== null;
 
     // Collapse concurrent callers (several components mounting at once,
     // or the proactive timer racing the 401 backstop) into one fetch.
-    return (this.pending ??= this.mint(fallback));
+    return (this.pending ??= this.mint(renewal));
   }
 
   // async on purpose: a synchronous throw from partner code becomes a
   // rejection, so the catch below — the only path that delivers onAuthError
   // and token-error — always runs.
-  private async mint(fallback: DoolaAuthError['type']): Promise<CustomerSession> {
+  private async mint(renewal: boolean): Promise<CustomerSession> {
     try {
       // Parsed, not trusted: this is the partner's own code and the second
       // untrusted boundary after the bus. A bad session here is not an error,
@@ -154,7 +172,7 @@ export class SessionManager {
     } catch (error: unknown) {
       if (this.stopped) throw error;
 
-      const type = classifyRejection(error, fallback);
+      const type = classifyRejection(error, renewal);
       this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
 
       throw error;

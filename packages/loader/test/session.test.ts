@@ -136,16 +136,54 @@ describe('SessionManager', () => {
     expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type: 'mint_failed' }));
   });
 
-  it('maps a 409 rejection to email_in_use', async () => {
+  it.each([
+    ['E_EMAIL_IN_USE', 'email_in_use'],
+    ['E_RESOURCE_CONFLICT', 'external_id_conflict'],
+    ['E_CUSTOMER_REVOKED', 'customer_revoked'],
+  ])('maps a first-mint 409 with code %s to %s', async (code, type) => {
     const onAuthError = vi.fn();
     const manager = new SessionManager(
-      vi.fn().mockRejectedValue({ status: 409 }),
+      vi.fn().mockRejectedValue({ status: 409, code }),
       onAuthError,
       vi.fn(),
     );
 
     await expect(manager.current()).rejects.toBeDefined();
-    expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type: 'email_in_use' }));
+    expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type }));
+  });
+
+  it.each([
+    ['no code', { status: 409 }],
+    ['an unknown code', { status: 409, code: 'E_SOMETHING_NEW' }],
+    ['a prototype key as code', { status: 409, code: 'constructor' }],
+    ['a known code on another status', { status: 400, code: 'E_EMAIL_IN_USE' }],
+  ])('maps a rejection with %s to mint_failed', async (_, rejection) => {
+    const onAuthError = vi.fn();
+    const manager = new SessionManager(vi.fn().mockRejectedValue(rejection), onAuthError, vi.fn());
+
+    await expect(manager.current()).rejects.toBeDefined();
+    expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type: 'mint_failed' }));
+  });
+
+  it.each([
+    ['E_EMAIL_IN_USE', 'renewal_failed'],
+    ['E_RESOURCE_CONFLICT', 'external_id_conflict'],
+    ['E_CUSTOMER_REVOKED', 'customer_revoked'],
+    [undefined, 'renewal_failed'],
+  ])('maps a renewal 409 with code %s to %s', async (code, type) => {
+    const onAuthError = vi.fn();
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(session(TEN_MINUTES_S))
+      .mockRejectedValueOnce({ status: 409, code });
+    const manager = new SessionManager(fetch, onAuthError, vi.fn());
+
+    await manager.current();
+    manager.resume();
+    await vi.advanceTimersByTimeAsync(TEN_MINUTES_MS);
+
+    expect(onAuthError).toHaveBeenCalledTimes(1);
+    expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ type }));
   });
 
   it('maps a first-fetch failure to mint_failed and a renewal failure to renewal_failed', async () => {

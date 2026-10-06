@@ -75,6 +75,8 @@ describe('parseAppMessage', () => {
 
     expect(retryable('partner_session_expired')).toBe(false);
     expect(retryable('email_in_use')).toBe(false);
+    expect(retryable('external_id_conflict')).toBe(false);
+    expect(retryable('customer_revoked')).toBe(false);
     expect(retryable('mint_failed')).toBe(true);
     expect(retryable('renewal_failed')).toBe(true);
   });

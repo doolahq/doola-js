@@ -229,9 +229,9 @@ living in the partner's page).
    when the renewal cannot succeed, `token-error` (step 4), so the frame is
    never left waiting.
 4. A `fetchAccessToken` rejection is mapped by the loader from the `status` the
-   rejection exposes (the convention lives in the contract, on
-   `FetchAccessToken`); a synchronous throw is treated as a rejection with no
-   `status`:
+   rejection exposes, and for a 409 from its `code` (the convention lives in
+   the contract, on `FetchAccessToken`); a synchronous throw is treated as a
+   rejection with no `status`:
    - `401` → `onAuthError({ type: 'partner_session_expired', message: … })`,
      and the loader stops retrying on its own — automatic renewal ends, but a
      `token-request` from the frame (a user-initiated try-again after logging
@@ -239,8 +239,15 @@ living in the partner's page).
      which fetches afresh. The partner's own user session died. Only the partner's own 401 can reach the loader — the route
      rule lives on `FetchAccessToken` in the contract; a broken `dk_` key
      lands in `mint_failed`/`renewal_failed`, never here.
-   - `409` → `onAuthError({ type: 'email_in_use', message: … })`, also
-     terminal. First mint only; cannot occur on renewal.
+   - `409` is terminal too, and named by `code`, which is doola's error code
+     the partner's route forwarded:
+     - `E_EMAIL_IN_USE` → `email_in_use` on the first mint. On renewal it
+       is `renewal_failed`, so the frame keeps working until the token
+       expires.
+     - `E_RESOURCE_CONFLICT` → `external_id_conflict`, on mint or renewal.
+     - `E_CUSTOMER_REVOKED` → `customer_revoked`, on mint or renewal.
+     - no `code`, or one not listed → `mint_failed` or `renewal_failed`, as
+       below. A 409 is never `email_in_use` without its code.
    - anything else → `mint_failed` on first mint, `renewal_failed` on renewal.
 
    In every case the loader also posts `token-error` into every mounted frame

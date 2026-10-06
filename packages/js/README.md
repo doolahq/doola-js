@@ -86,8 +86,8 @@ export const POST = createSessionHandler({
     return user ? { email: user.email, externalCustomerId: user.id } : null;
   },
 
-  // The browser only gets the status. This says why: a revoked key, an outage, or a field
-  // doola rejected, with doola's error code.
+  // The browser gets the status and doola's error code. This says why, for your logs: a
+  // revoked key, an outage, or a field doola rejected.
   onFailure: (failure) => console.error('doola session failed', failure),
 });
 ```
@@ -109,15 +109,18 @@ const doola = await loadDoola({
   // Called on mount and on every renewal. Always fetch a fresh session.
   fetchAccessToken: async () => {
     const r = await fetch('/doola-session', { method: 'POST' });
-    // Reject with the HTTP status: the loader maps 401 and 409 to their own error types.
-    if (!r.ok) throw Object.assign(new Error('doola session'), { status: r.status });
+    if (!r.ok) {
+      // Reject with the status and doola's error code: the loader maps them to error types.
+      const { code } = await r.json().catch(() => ({}));
+      throw Object.assign(new Error('doola session'), { status: r.status, code });
+    }
     return r.json();
   },
 
   // Can fire more than once, so keep it idempotent.
   onAuthError: (error) => {
     if (error.type === 'partner_session_expired') location.assign('/login');
-    if (error.type === 'email_in_use') showSupportMessage();
+    if (error.type === 'email_in_use' || error.type === 'customer_revoked') showSupportMessage();
   },
 
   // The customer submitted the wizard. Start your checkout for this company.
