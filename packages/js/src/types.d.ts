@@ -78,14 +78,16 @@ export type FetchAccessToken = () => Promise<CustomerSession>;
  * partner's own login.
  *
  * The three 409 cases below are terminal too, and retrying them never
- * succeeds. Each is named by the rejection's `code` (see
- * {@link FetchAccessToken}), so a route that forwards only the status gets
- * `mint_failed` or `renewal_failed` for them instead.
+ * succeeds. doola answers 409 for each, so they are told apart by the
+ * rejection's `code` (see {@link FetchAccessToken}).
  *
  * - `email_in_use`: the customer's email already belongs to a doola
- *   account outside the partner's tenant (`E_EMAIL_IN_USE`). First mint
- *   only: on renewal the same code is `renewal_failed`. The expected
- *   response is a support path or a different email.
+ *   account outside the partner's tenant (`E_EMAIL_IN_USE`). Also any
+ *   first-mint 409 whose rejection carries no `code`, from a route that
+ *   forwards only the status; the frame then shows its generic failure,
+ *   since the email may not be the cause. First mint only: on renewal a
+ *   409 with this code or none is `renewal_failed`. The expected response
+ *   is a support path or a different email.
  * - `external_id_conflict`: the `externalCustomerId` the route sent
  *   conflicts with doola's record (`E_RESOURCE_CONFLICT`): the customer is
  *   bound to a different one, or this one is bound to another customer.
@@ -96,7 +98,7 @@ export type FetchAccessToken = () => Promise<CustomerSession>;
  * Everything else is `mint_failed` on the first fetch and
  * `renewal_failed` after a session existed: a network error, a malformed
  * session, a 5xx (including the route's 502 for doola's 401), any other
- * status, and a 409 without a recognised `code`. After `renewal_failed`
+ * status, and a 409 with a `code` not listed above. After `renewal_failed`
  * the frame keeps working until the current token expires.
  */
 export interface DoolaAuthError {

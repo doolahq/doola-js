@@ -34,20 +34,30 @@ const CONFLICTS: ReadonlyMap<unknown, DoolaAuthError['type']> = new Map([
 ] as const);
 
 /**
+ * What the partner's `onAuthError` is told, and the reason the frame shows.
+ * They differ for one case only: a first-mint 409 with no `code`.
+ */
+export interface AuthFailure {
+  error: DoolaAuthError;
+  shown: DoolaAuthError['type'];
+}
+
+/**
  * The status→type mapping the loader owns (docs/protocol.md). The public
  * contract (FetchAccessToken docs) asks partners to reject with an object
  * exposing the HTTP `status`, and the `code` their route forwarded.
  * This is the implementer of that published rule.
  */
 function classifyRejection(error: unknown, renewal: boolean): DoolaAuthError['type'] {
-  const { status, code } =
-    typeof error === 'object' && error !== null
-      ? (error as { status?: unknown; code?: unknown })
-      : {};
+  const { status, code } = rejection(error);
   const fallback = renewal ? 'renewal_failed' : 'mint_failed';
 
   if (status === 401) return 'partner_session_expired';
   if (status !== 409) return fallback;
+
+  // A route that forwards only the status, as every route did before the code
+  // existed. /v1 keeps reporting its first-mint 409 as email_in_use.
+  if (code === undefined) return renewal ? fallback : 'email_in_use';
 
   const conflict = CONFLICTS.get(code);
 
@@ -56,6 +66,18 @@ function classifyRejection(error: unknown, renewal: boolean): DoolaAuthError['ty
   if (conflict === 'email_in_use' && renewal) return fallback;
 
   return conflict ?? fallback;
+}
+
+/**
+ * The frame shows the email copy only when doola said the email is the
+ * problem. Without a code it may not be, so the founder gets the neutral one.
+ */
+function shownInFrame(error: unknown, type: DoolaAuthError['type']): DoolaAuthError['type'] {
+  return type === 'email_in_use' && rejection(error).code === undefined ? 'mint_failed' : type;
+}
+
+function rejection(error: unknown): { status?: unknown; code?: unknown } {
+  return typeof error === 'object' && error !== null ? error : {};
 }
 
 /**
@@ -86,7 +108,7 @@ export class SessionManager {
 
   constructor(
     private readonly fetchAccessToken: FetchAccessToken,
-    private readonly onAuthError: (error: DoolaAuthError) => void,
+    private readonly onAuthError: (failure: AuthFailure) => void,
     private readonly onSession: (session: CustomerSession) => void,
   ) {}
 
@@ -173,7 +195,8 @@ export class SessionManager {
       if (this.stopped) throw error;
 
       const type = classifyRejection(error, renewal);
-      this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      this.onAuthError({ error: { type, message }, shown: shownInFrame(error, type) });
 
       throw error;
     } finally {

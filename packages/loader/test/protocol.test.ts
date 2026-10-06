@@ -81,6 +81,14 @@ describe('parseAppMessage', () => {
     expect(retryable('renewal_failed')).toBe(true);
   });
 
+  it('shows the reason it is given, and keeps the retryability of the partner type', () => {
+    expect(tokenError({ type: 'email_in_use', message: 'm' }, 'mint_failed').payload).toEqual({
+      reason: 'mint_failed',
+      message: 'm',
+      retryable: false,
+    });
+  });
+
   it("stamps outbound messages with the version it is given, not this side's maximum", () => {
     const token = {
       type: 'token',

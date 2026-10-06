@@ -204,10 +204,17 @@ export function parseSession(value: unknown): CustomerSession {
   };
 }
 
-export function tokenError(error: DoolaAuthError): Extract<LoaderMessage, { type: 'token-error' }> {
+/**
+ * `retryable` follows what the partner is told, and `reason` what the frame
+ * shows, so a terminal failure shown with neutral copy stays terminal.
+ */
+export function tokenError(
+  error: DoolaAuthError,
+  shown: DoolaAuthError['type'] = error.type,
+): Extract<LoaderMessage, { type: 'token-error' }> {
   return {
     type: 'token-error',
-    payload: { reason: error.type, message: error.message, retryable: RETRYABLE[error.type] },
+    payload: { reason: shown, message: error.message, retryable: RETRYABLE[error.type] },
   };
 }
 

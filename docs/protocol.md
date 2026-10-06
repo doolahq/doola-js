@@ -239,15 +239,20 @@ living in the partner's page).
      which fetches afresh. The partner's own user session died. Only the partner's own 401 can reach the loader — the route
      rule lives on `FetchAccessToken` in the contract; a broken `dk_` key
      lands in `mint_failed`/`renewal_failed`, never here.
-   - `409` is terminal too, and named by `code`, which is doola's error code
-     the partner's route forwarded:
-     - `E_EMAIL_IN_USE` → `email_in_use` on the first mint. On renewal it
-       is `renewal_failed`, so the frame keeps working until the token
-       expires.
-     - `E_RESOURCE_CONFLICT` → `external_id_conflict`, on mint or renewal.
-     - `E_CUSTOMER_REVOKED` → `customer_revoked`, on mint or renewal.
-     - no `code`, or one not listed → `mint_failed` or `renewal_failed`, as
-       below. A 409 is never `email_in_use` without its code.
+   - `409` is named by `code`, which is doola's error code the partner's
+     route forwarded:
+     - `E_EMAIL_IN_USE` → `email_in_use` on the first mint, terminal. On
+       renewal it is `renewal_failed`, so the frame keeps working until the
+       token expires.
+     - `E_RESOURCE_CONFLICT` → `external_id_conflict`, terminal, on mint or
+       renewal.
+     - `E_CUSTOMER_REVOKED` → `customer_revoked`, terminal, on mint or
+       renewal.
+     - no `code` → `email_in_use` on the first mint, as before the code
+       existed, but the frame's `token-error` carries `reason: mint_failed`
+       (still `retryable: false`): the email may not be the cause, so the
+       founder is not told it is. On renewal it is `renewal_failed`.
+     - a `code` not listed → `mint_failed` or `renewal_failed`, as below.
    - anything else → `mint_failed` on first mint, `renewal_failed` on renewal.
 
    In every case the loader also posts `token-error` into every mounted frame
