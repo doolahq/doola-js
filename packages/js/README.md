@@ -125,7 +125,8 @@ const doola = await loadDoola({
 });
 
 // Mount into an element on your page: <div id="doola"></div>
-document.getElementById('doola')!.append(doola.create());
+const element = doola.create();
+document.getElementById('doola')!.append(element);
 ```
 
 `create()` takes no arguments. The app decides what to show from the customer's state: the wizard
@@ -185,10 +186,11 @@ async function confirmPayment(companyId: string, paymentReference: string): Prom
 `onFormed` can fire again for the same company, for example when a founder comes back to an unpaid
 formation and asks to pay. Key your orders by `companyId` so you never charge twice.
 
-After you confirm, mount the SDK again with a new `doola.create()`. Its payment screen does not
-watch for your confirmation, so only a new mount shows the founder their company. From then on,
-the Partner API's [webhooks](https://docs.doola.com/api/webhooks) tell you how the formation is
-going.
+After you confirm, replace the element you mounted in step 2: `element.replaceWith(doola.create())`.
+Its payment screen does not watch for your confirmation, so only a new element shows the founder
+their company. Each `create()` is a separate iframe, so never append a second one beside the old.
+From then on, the Partner API's [webhooks](https://docs.doola.com/api/webhooks) tell you how the
+formation is going.
 
 Edge cases, refunds and reconciliation: [Take payment](https://docs.doola.com/sdk/payments).
 
