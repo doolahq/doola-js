@@ -258,6 +258,10 @@ living in the partner's page).
    Semantics and the partner's expected response are owned by the contract
    (see `DoolaAuthError`).
 
+   A new `reason` ships in the app before the loader sends it. The app drops a
+   `token-error` whose reason it does not know, exactly like a malformed
+   payload, and a frame that drops it keeps waiting on its `token-request`.
+
 ## Sessions never touch storage
 
 The session lives in loader memory and app memory, passed only over this bus.

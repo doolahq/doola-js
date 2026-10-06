@@ -4,7 +4,11 @@
  * only then are the profile fields used.
  */
 export interface DoolaCustomer {
-  /** Matched after `externalCustomerId`, and the new customer's email when none matches. */
+  /**
+   * Matched after `externalCustomerId`, and the new customer's email when none
+   * matches. Send only an address your own auth has verified: doola resolves the
+   * customer from it, and the session route answers with doola's code for it.
+   */
   email: string;
 
   /**
@@ -205,8 +209,8 @@ function failed(status: number, failure: CustomerSessionFailure): CustomerSessio
   return { status, body: null, failure };
 }
 
-// Only a status doola chose is forwarded with its code. The 401 becomes a 502
-// above, and its code describes the partner's key, not the customer.
+// Only for a status doola chose: mint() rewrites doola's 401 to a 502 without
+// calling this, because that code describes the partner's key, not the customer.
 function refused(status: number, failure: CustomerSessionFailure): CustomerSessionResult {
   const { doolaCode } = failure;
 
@@ -275,8 +279,8 @@ function respond({ status, body, code }: CustomerSessionResult): Response {
 /**
  * Mints a session for one customer and returns what the session route should
  * send, for Express, Fastify or your own routing. Send `status`, with `body` as
- * JSON when it is not null. {@link createSessionHandler} does this for a
- * web-standard route.
+ * JSON when it is not null, or `{ code }` as JSON when `code` is set.
+ * {@link createSessionHandler} does this for a web-standard route.
  *
  * Never rejects for a doola or network failure: those resolve to a status, with
  * `failure` saying why. It rejects only for a missing or invalid `apiKey`, which
