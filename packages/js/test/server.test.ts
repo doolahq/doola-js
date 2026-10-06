@@ -200,18 +200,30 @@ describe('createSessionHandler', () => {
   });
 
   it.each([400, 403, 404, 409, 429, 500, 503])(
-    "passes doola's %i through without its body",
+    "passes doola's %i through with its code and nothing else from its body",
     async (status) => {
-      fetchMock.mockResolvedValue(
-        Response.json({ payload: null, error: { code: 'E', message: 'doola says' } }, { status }),
-      );
+      fetchMock.mockResolvedValue(doolaError(status, 'E_EMAIL_IN_USE'));
 
       const response = await call();
 
       expect(response.status).toBe(status);
-      expect(await response.text()).toBe('');
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.json()).toEqual({ code: 'E_EMAIL_IN_USE' });
     },
   );
+
+  it.each([
+    ['without an error code', { payload: null, error: { message: 'doola says' } }],
+    ['with a non-string error code', { payload: null, error: { code: 42 } }],
+    ['without an envelope', { message: 'doola says' }],
+  ])("passes doola's error through with no body when it comes %s", async (_, body) => {
+    fetchMock.mockResolvedValue(Response.json(body, { status: 409 }));
+
+    const response = await call();
+
+    expect(response.status).toBe(409);
+    expect(await response.text()).toBe('');
+  });
 
   it('answers 502 when doola cannot be reached', async () => {
     fetchMock.mockRejectedValue(new TypeError('fetch failed'));
@@ -255,36 +267,44 @@ describe('createSessionHandler', () => {
       "doola's 401",
       () => fetchMock.mockResolvedValue(doolaError(401, 'E_AUTH_INVALID')),
       { reason: 'doola_unauthorized', doolaStatus: 401, doolaCode: 'E_AUTH_INVALID' },
+      '',
     ],
     [
       "doola's 400",
       () => fetchMock.mockResolvedValue(doolaError(400, 'E_VALIDATION_FAILED')),
       { reason: 'doola_error', doolaStatus: 400, doolaCode: 'E_VALIDATION_FAILED' },
+      '{"code":"E_VALIDATION_FAILED"}',
     ],
     [
       'an error without an envelope',
       () => fetchMock.mockResolvedValue(new Response('<html>', { status: 503 })),
       { reason: 'doola_error', doolaStatus: 503 },
+      '',
     ],
     [
       'a network failure',
       () => fetchMock.mockRejectedValue(new TypeError('fetch failed')),
       { reason: 'doola_unreachable' },
+      '',
     ],
     [
       'a malformed 200',
       () => fetchMock.mockResolvedValue(Response.json({ payload: null })),
       { reason: 'invalid_response', doolaStatus: 200 },
+      '',
     ],
-  ])('tells onFailure about %s, and the browser only the status', async (_, arrange, failure) => {
-    arrange();
-    const onFailure = vi.fn();
+  ])(
+    'tells onFailure about %s, and the browser only the status and code',
+    async (_, arrange, failure, browserBody) => {
+      arrange();
+      const onFailure = vi.fn();
 
-    const response = await call(handler(undefined, LIVE_KEY, onFailure));
+      const response = await call(handler(undefined, LIVE_KEY, onFailure));
 
-    expect(onFailure).toHaveBeenCalledExactlyOnceWith(failure);
-    expect(await response.text()).toBe('');
-  });
+      expect(onFailure).toHaveBeenCalledExactlyOnceWith(failure);
+      expect(await response.text()).toBe(browserBody);
+    },
+  );
 
   it('does not call onFailure for a session, or for a customer who is signed out', async () => {
     const onFailure = vi.fn();
@@ -384,6 +404,23 @@ describe('createCustomerSession', () => {
     await expect(
       createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER }),
     ).resolves.toMatchObject({ status, body: null, failure: { reason } });
+  });
+
+  it("carries doola's code on a refusal, for the browser", async () => {
+    fetchMock.mockResolvedValue(doolaError(409, 'E_CUSTOMER_REVOKED'));
+
+    await expect(
+      createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER }),
+    ).resolves.toMatchObject({ status: 409, body: null, code: 'E_CUSTOMER_REVOKED' });
+  });
+
+  it("never carries the code of doola's 401, which is about the key", async () => {
+    fetchMock.mockResolvedValue(doolaError(401, 'E_AUTH_INVALID'));
+
+    const result = await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER });
+
+    expect(result.status).toBe(502);
+    expect(result).not.toHaveProperty('code');
   });
 
   it('returns a new result for every failure, so one caller cannot change the next', async () => {
