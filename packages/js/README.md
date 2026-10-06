@@ -86,8 +86,8 @@ export const POST = createSessionHandler({
     return user ? { email: user.email, externalCustomerId: user.id } : null;
   },
 
-  // The browser gets the status and doola's error code. This says why, for your logs: a
-  // revoked key, an outage, or a field doola rejected.
+  // The browser gets the status, plus doola's error code when doola refused the customer.
+  // This says why, for your logs: a revoked key, an outage, or a field doola rejected.
   onFailure: (failure) => console.error('doola session failed', failure),
 });
 ```

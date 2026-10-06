@@ -58,7 +58,8 @@ export interface CustomerSessionResult {
 }
 
 /**
- * Why a session could not be minted. The browser only ever sees the status, so
+ * Why a session could not be minted, for your logs. The browser sees the status,
+ * and doola's code when the route forwards {@link CustomerSessionResult.code}, so
  * this is the one place a bad key, an outage or a rejected field shows up.
  */
 export interface CustomerSessionFailure {
