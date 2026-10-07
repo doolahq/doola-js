@@ -45,11 +45,10 @@ export interface CustomerSessionResult {
   body: { accessToken: string; expiresIn: number } | null;
 
   /**
-   * doola's error code, such as `E_EMAIL_IN_USE`, when doola refused the
-   * request with one. Send it as the JSON body `{ code }` with `status`, so
-   * `fetchAccessToken` can reject with it: doola answers 409 for more than one
-   * reason, and the loader tells them apart by this code. Unlike `failure`, it
-   * is safe for the browser.
+   * doola's error code on a 409, such as `E_EMAIL_IN_USE`. Send it as the
+   * JSON body `{ code }` with `status`, so `fetchAccessToken` can reject with
+   * it: doola answers 409 for more than one reason, and the loader tells them
+   * apart by this code. Unlike `failure`, it is safe for the browser.
    */
   code?: string;
 
@@ -210,12 +209,14 @@ function failed(status: number, failure: CustomerSessionFailure): CustomerSessio
   return { status, body: null, failure };
 }
 
-// Only for a status doola chose: mint() rewrites doola's 401 to a 502 without
-// calling this, because that code describes the partner's key, not the customer.
+// Only a 409 is about the customer. Every other code (the 401 and 403s about
+// the key or tenant, the 400s about the request) is the partner's to log.
 function refused(status: number, failure: CustomerSessionFailure): CustomerSessionResult {
   const { doolaCode } = failure;
 
-  return doolaCode ? { ...failed(status, failure), code: doolaCode } : failed(status, failure);
+  return status === 409 && doolaCode
+    ? { ...failed(status, failure), code: doolaCode }
+    : failed(status, failure);
 }
 
 async function mint(
@@ -249,8 +250,8 @@ async function mint(
     // send a signed-in customer to the partner's login, on every renewal.
     if (doolaStatus === 401) return failed(502, { reason: 'doola_unauthorized', ...detail });
 
-    // Every other status passes through with doola's code, so the loader can
-    // tell doola's 409s apart, and a status doola adds later needs no change here.
+    // Every other status passes through, a 409 with doola's code so the loader
+    // can tell them apart, and a status doola adds later needs no change here.
     return refused(doolaStatus, { reason: 'doola_error', ...detail });
   }
 
@@ -280,7 +281,7 @@ function respond({ status, body, code }: CustomerSessionResult): Response {
 /**
  * Mints a session for one customer and returns what the session route should
  * send, for Express, Fastify or your own routing. Send `status`, with `body` as
- * JSON when it is not null, or `{ code }` as JSON when `code` is set.
+ * JSON when it is not null, or `{ code }` as JSON when `code` is set (a 409).
  * {@link createSessionHandler} does this for a web-standard route.
  *
  * Never rejects for a doola or network failure: those resolve to a status, with

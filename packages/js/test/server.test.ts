@@ -199,18 +199,27 @@ describe('createSessionHandler', () => {
     expect(await response.text()).toBe('');
   });
 
-  it.each([400, 403, 404, 409, 429, 500, 503])(
-    "passes doola's %i through with its code and nothing else from its body",
+  it.each([400, 403, 404, 429, 500, 503])(
+    "passes doola's %i through without its body",
     async (status) => {
-      fetchMock.mockResolvedValue(doolaError(status, 'E_EMAIL_IN_USE'));
+      fetchMock.mockResolvedValue(doolaError(status, 'E_TENANT_SUSPENDED'));
 
       const response = await call();
 
       expect(response.status).toBe(status);
-      expect(response.headers.get('cache-control')).toBe('no-store');
-      expect(await response.json()).toEqual({ code: 'E_EMAIL_IN_USE' });
+      expect(await response.text()).toBe('');
     },
   );
+
+  it("passes doola's 409 through with its code and nothing else from its body", async () => {
+    fetchMock.mockResolvedValue(doolaError(409, 'E_EMAIL_IN_USE'));
+
+    const response = await call();
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.json()).toEqual({ code: 'E_EMAIL_IN_USE' });
+  });
 
   it.each([
     ['without an error code', { payload: null, error: { message: 'doola says' } }],
@@ -273,7 +282,13 @@ describe('createSessionHandler', () => {
       "doola's 400",
       () => fetchMock.mockResolvedValue(doolaError(400, 'E_VALIDATION_FAILED')),
       { reason: 'doola_error', doolaStatus: 400, doolaCode: 'E_VALIDATION_FAILED' },
-      '{"code":"E_VALIDATION_FAILED"}',
+      '',
+    ],
+    [
+      "doola's 409",
+      () => fetchMock.mockResolvedValue(doolaError(409, 'E_RESOURCE_CONFLICT')),
+      { reason: 'doola_error', doolaStatus: 409, doolaCode: 'E_RESOURCE_CONFLICT' },
+      '{"code":"E_RESOURCE_CONFLICT"}',
     ],
     [
       'an error without an envelope',
@@ -294,7 +309,7 @@ describe('createSessionHandler', () => {
       '',
     ],
   ])(
-    'tells onFailure about %s, and the browser only the status and code',
+    'tells onFailure about %s, and the browser only the status, and the code of a 409',
     async (_, arrange, failure, browserBody) => {
       arrange();
       const onFailure = vi.fn();
