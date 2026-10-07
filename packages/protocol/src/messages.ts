@@ -50,7 +50,12 @@ export interface CustomerSession {
 }
 
 export type AuthErrorType =
-  'partner_session_expired' | 'email_in_use' | 'mint_failed' | 'renewal_failed';
+  | 'partner_session_expired'
+  | 'email_in_use'
+  | 'external_id_conflict'
+  | 'customer_revoked'
+  | 'mint_failed'
+  | 'renewal_failed';
 
 export type LoadErrorType =
   | 'api_connection_error'

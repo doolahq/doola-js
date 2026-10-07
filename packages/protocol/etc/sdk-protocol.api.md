@@ -67,7 +67,7 @@ export type AuthErrorPayload = {
 };
 
 // @public (undocumented)
-export type AuthErrorType = 'partner_session_expired' | 'email_in_use' | 'mint_failed' | 'renewal_failed';
+export type AuthErrorType = 'partner_session_expired' | 'email_in_use' | 'external_id_conflict' | 'customer_revoked' | 'mint_failed' | 'renewal_failed';
 
 // @public
 export interface CustomerSession {

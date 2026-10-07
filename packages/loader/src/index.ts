@@ -75,8 +75,8 @@ function init(options: DoolaOptions): Doola {
   // it never hangs on an unanswered token-request, the partner gets onAuthError.
   const sessions = new SessionManager(
     fetchAccessToken,
-    (error) => {
-      broadcast(tokenError(error));
+    ({ error, shown }) => {
+      broadcast(tokenError(error, shown));
       onAuthError(error);
     },
     (session) => broadcast({ type: 'token', payload: { session } }),

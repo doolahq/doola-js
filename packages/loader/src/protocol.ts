@@ -54,13 +54,16 @@ export type LoaderMessage =
 export type Envelope = LoaderMessage & { v: number };
 
 /**
- * Whether the loader will keep renewing on its own after this failure.
+ * Whether the failure is not final: a `token-request` or a new mount fetches
+ * again (the loader schedules no retry of its own).
  * Exhaustive over the contract's union so a new case is a compile error
  * here rather than a silent "retryable".
  */
 const RETRYABLE: Record<DoolaAuthError['type'], boolean> = {
   partner_session_expired: false,
   email_in_use: false,
+  external_id_conflict: false,
+  customer_revoked: false,
   mint_failed: true,
   renewal_failed: true,
 };
@@ -202,10 +205,17 @@ export function parseSession(value: unknown): CustomerSession {
   };
 }
 
-export function tokenError(error: DoolaAuthError): Extract<LoaderMessage, { type: 'token-error' }> {
+/**
+ * `retryable` follows what the partner is told, and `reason` what the frame
+ * shows, so a terminal failure shown with neutral copy stays terminal.
+ */
+export function tokenError(
+  error: DoolaAuthError,
+  shown: DoolaAuthError['type'],
+): Extract<LoaderMessage, { type: 'token-error' }> {
   return {
     type: 'token-error',
-    payload: { reason: error.type, message: error.message, retryable: RETRYABLE[error.type] },
+    payload: { reason: shown, message: error.message, retryable: RETRYABLE[error.type] },
   };
 }
 

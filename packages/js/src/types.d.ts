@@ -47,8 +47,12 @@ export interface CustomerSession {
  * session can never outlive the partner login that created it.
  *
  * On failure, reject with an object exposing the HTTP `status` the
- * partner's route observed —
- * `throw Object.assign(new Error('doola session'), { status: r.status })`.
+ * partner's route observed, and the `code` from its JSON body when it
+ * sent one:
+ * `throw Object.assign(new Error('doola session'), { status: r.status, code })`.
+ * `code` is doola's `error.code`, which the route forwards as `{ code }`
+ * (`@doola/js/server` does): doola answers 409 for several reasons, and
+ * the code is the only thing that tells them apart.
  * The route itself must never flatten a failure to 200, and must never
  * forward doola's own 401: that status means the partner's key or
  * tenant, not the customer's session, and the loader reads any 401 as
@@ -73,14 +77,42 @@ export type FetchAccessToken = () => Promise<CustomerSession>;
  * product. The expected response is redirecting the user to the
  * partner's own login.
  *
- * `email_in_use` is the other terminal case: the customer's email
- * already belongs to a doola account outside the partner's tenant (the
- * broker's 409 `E_EMAIL_IN_USE`). First mint only, never on renewal, and
- * retrying never succeeds — the expected response is a support path or a
- * different email.
+ * The three 409 cases below are terminal too, and retrying them never
+ * succeeds. doola answers 409 for each, so they are told apart by the
+ * rejection's `code` (see {@link FetchAccessToken}).
+ *
+ * - `email_in_use`: the email the route sent cannot be this customer's
+ *   (`E_EMAIL_IN_USE`): it belongs to a doola account outside the
+ *   partner's tenant, to a non-customer login such as a partner-portal
+ *   user, or to another account it would be renamed onto. Also any
+ *   first-mint 409 whose rejection carries no `code`, from a route that
+ *   forwards only the status; the frame then shows its generic failure,
+ *   since the email may not be the cause. First mint only: on renewal a
+ *   409 with this code or none is `renewal_failed`. The expected response
+ *   is a support path or a different email.
+ * - `external_id_conflict`: doola could not bind the customer to what the
+ *   route sent (`E_RESOURCE_CONFLICT`). Usually the `externalCustomerId`:
+ *   the customer is bound to a different one, or this one is bound to
+ *   another customer. Also a customer from before doola's accounts were
+ *   unified, which cannot take a new email. Not the customer's to fix:
+ *   check the mapping, or ask doola support.
+ * - `customer_revoked`: doola deactivated this customer
+ *   (`E_CUSTOMER_REVOKED`). The expected response is a support path.
+ *
+ * Everything else is `mint_failed` on the first fetch and
+ * `renewal_failed` after a session existed: a network error, a malformed
+ * session, a 5xx (including the route's 502 for doola's 401), any other
+ * status, and a 409 with a `code` not listed above. After `renewal_failed`
+ * the frame keeps working until the current token expires.
  */
 export interface DoolaAuthError {
-  type: 'partner_session_expired' | 'email_in_use' | 'mint_failed' | 'renewal_failed';
+  type:
+    | 'partner_session_expired'
+    | 'email_in_use'
+    | 'external_id_conflict'
+    | 'customer_revoked'
+    | 'mint_failed'
+    | 'renewal_failed';
   message: string;
 }
 

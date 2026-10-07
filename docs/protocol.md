@@ -109,13 +109,13 @@ The mounting peer is the loader. The portal's branding preview frames a
 different document and speaks a subset of these messages; see "The preview
 peer".
 
-| type           | payload                                                      | since | notes                                                                                                                                                                                                                                                            |
-| -------------- | ------------------------------------------------------------ | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `init`         | `{ session, appearance?, locale?, protocol, presentation? }` | 1     | first message after `ready`; `appearance` is parsed and ignored, see below; `presentation` is the frame's mode at handshake time, absent only from a loader older than the field                                                                                 |
-| `token`        | `{ session }`                                                | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                |
-| `update`       | `{ appearance?, locale?, preview? }`                         | 1     | runtime `update()` call, see below; `appearance` and `preview` are read only by the preview peer, see "The preview peer"                                                                                                                                         |
-| `token-error`  | `{ reason, message, retryable }`                             | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type; `retryable` means the loader will keep renewing on its own — the frame may still send `token-request` in either case, for terminal reasons only after the user has acted outside the frame |
-| `presentation` | `{ mode }`                                                   | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                  |
+| type           | payload                                                      | since | notes                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------- | ------------------------------------------------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `init`         | `{ session, appearance?, locale?, protocol, presentation? }` | 1     | first message after `ready`; `appearance` is parsed and ignored, see below; `presentation` is the frame's mode at handshake time, absent only from a loader older than the field                                                                                                                                                                                                            |
+| `token`        | `{ session }`                                                | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                                                                                                                                           |
+| `update`       | `{ appearance?, locale?, preview? }`                         | 1     | runtime `update()` call, see below; `appearance` and `preview` are read only by the preview peer, see "The preview peer"                                                                                                                                                                                                                                                                    |
+| `token-error`  | `{ reason, message, retryable }`                             | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type, except a first-mint 409 with no `code` (step 4); `retryable: true` means the failure is not final: a `token-request` or a new mount fetches again (the loader schedules no retry of its own); the frame may send `token-request` in either case, for terminal reasons only after the user has acted outside the frame |
+| `presentation` | `{ mode }`                                                   | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                                                                                                                                             |
 
 `update` carries the loader's **resolved** state, not the partner's raw call:
 the contract's merge semantics (absent key keeps, key present as `undefined`
@@ -229,9 +229,9 @@ living in the partner's page).
    when the renewal cannot succeed, `token-error` (step 4), so the frame is
    never left waiting.
 4. A `fetchAccessToken` rejection is mapped by the loader from the `status` the
-   rejection exposes (the convention lives in the contract, on
-   `FetchAccessToken`); a synchronous throw is treated as a rejection with no
-   `status`:
+   rejection exposes, and for a 409 from its `code` (the convention lives in
+   the contract, on `FetchAccessToken`); a synchronous throw is treated as a
+   rejection with no `status`:
    - `401` → `onAuthError({ type: 'partner_session_expired', message: … })`,
      and the loader stops retrying on its own — automatic renewal ends, but a
      `token-request` from the frame (a user-initiated try-again after logging
@@ -239,17 +239,33 @@ living in the partner's page).
      which fetches afresh. The partner's own user session died. Only the partner's own 401 can reach the loader — the route
      rule lives on `FetchAccessToken` in the contract; a broken `dk_` key
      lands in `mint_failed`/`renewal_failed`, never here.
-   - `409` → `onAuthError({ type: 'email_in_use', message: … })`, also
-     terminal. First mint only; cannot occur on renewal.
+   - `409` is named by `code`, which is doola's error code the partner's
+     route forwarded:
+     - `E_EMAIL_IN_USE` → `email_in_use` on the first mint, terminal. On
+       renewal it is `renewal_failed`, so the frame keeps working until the
+       token expires.
+     - `E_RESOURCE_CONFLICT` → `external_id_conflict`, terminal, on mint or
+       renewal.
+     - `E_CUSTOMER_REVOKED` → `customer_revoked`, terminal, on mint or
+       renewal.
+     - no `code` → `email_in_use` on the first mint, as before the code
+       existed, but the frame's `token-error` carries `reason: mint_failed`
+       (still `retryable: false`): the email may not be the cause, so the
+       founder is not told it is. On renewal it is `renewal_failed`.
+     - a `code` not listed → `mint_failed` or `renewal_failed`, as below.
    - anything else → `mint_failed` on first mint, `renewal_failed` on renewal.
 
-   In every case the loader also posts `token-error` into every mounted frame
-   with the same `reason`, so the app can render the state instead of hanging
+   In every case the loader also posts `token-error` into every mounted frame,
+   with the same `reason` except for a first-mint 409 with no `code`, so the app can render the state instead of hanging
    on an unanswered `token-request`. `onAuthError` fires each time as well —
    the contract makes it idempotent for that reason.
 
    Semantics and the partner's expected response are owned by the contract
    (see `DoolaAuthError`).
+
+   A new `reason` ships in the app before the loader sends it. The app drops a
+   `token-error` whose reason it does not know, exactly like a malformed
+   payload, and a frame that drops it keeps waiting on its `token-request`.
 
 ## Sessions never touch storage
 

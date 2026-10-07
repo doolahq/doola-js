@@ -22,22 +22,67 @@ interface ActiveSession {
 }
 
 /**
+ * doola answers 409 for several reasons, so a 409 is named by the `code` the
+ * rejection carries (FetchAccessToken docs).
+ */
+const CONFLICTS: ReadonlyMap<string, DoolaAuthError['type']> = new Map([
+  ['E_EMAIL_IN_USE', 'email_in_use'],
+  ['E_RESOURCE_CONFLICT', 'external_id_conflict'],
+  ['E_CUSTOMER_REVOKED', 'customer_revoked'],
+] as const);
+
+/**
+ * doola's codes only. A client library puts its own `code` on a rejection
+ * (axios rejects a 409 with `ERR_BAD_REQUEST`), and that must not take a
+ * status-only route off the /v1 mapping.
+ */
+const DOOLA_CODE = /^E_[A-Z0-9_]+$/;
+
+/** What the partner's `onAuthError` is told, and the reason the frame shows. */
+interface AuthFailure {
+  error: DoolaAuthError;
+  shown: DoolaAuthError['type'];
+}
+
+type Classified = { type: DoolaAuthError['type']; shown: DoolaAuthError['type'] };
+
+const same = (type: DoolaAuthError['type']): Classified => ({ type, shown: type });
+
+/**
  * The status→type mapping the loader owns (docs/protocol.md). The public
  * contract (FetchAccessToken docs) asks partners to reject with an object
- * exposing the HTTP `status` — throwing the fetch Response satisfies it.
+ * exposing the HTTP `status`, and the `code` their route forwarded.
  * This is the implementer of that published rule.
  */
-function classifyRejection(
-  error: unknown,
-  fallback: DoolaAuthError['type'],
-): DoolaAuthError['type'] {
-  const status =
-    typeof error === 'object' && error !== null ? (error as { status?: unknown }).status : null;
+function classifyRejection(error: unknown, renewal: boolean): Classified {
+  const { status, code } = rejection(error);
+  const fallback = renewal ? 'renewal_failed' : 'mint_failed';
 
-  if (status === 401) return 'partner_session_expired';
-  if (status === 409) return 'email_in_use';
+  if (status === 401) return same('partner_session_expired');
+  if (status !== 409) return same(fallback);
 
-  return fallback;
+  // A route that forwards only the status, as every route did before the code
+  // existed. /v1 keeps telling the partner email_in_use on the first mint, but
+  // the email may not be the cause, so the founder gets the neutral copy.
+  if (code === undefined) {
+    return renewal ? same(fallback) : { type: 'email_in_use', shown: 'mint_failed' };
+  }
+
+  const conflict = CONFLICTS.get(code);
+
+  // The contract promises email_in_use on the first mint only. Mid-session the
+  // frame keeps working until the token expires, which renewal_failed says.
+  if (conflict === 'email_in_use' && renewal) return same(fallback);
+
+  return same(conflict ?? fallback);
+}
+
+function rejection(error: unknown): { status?: unknown; code?: string } {
+  if (typeof error !== 'object' || error === null) return {};
+
+  const { status, code } = error as { status?: unknown; code?: unknown };
+
+  return typeof code === 'string' && DOOLA_CODE.test(code) ? { status, code } : { status };
 }
 
 /**
@@ -68,7 +113,7 @@ export class SessionManager {
 
   constructor(
     private readonly fetchAccessToken: FetchAccessToken,
-    private readonly onAuthError: (error: DoolaAuthError) => void,
+    private readonly onAuthError: (failure: AuthFailure) => void,
     private readonly onSession: (session: CustomerSession) => void,
   ) {}
 
@@ -120,17 +165,17 @@ export class SessionManager {
     // Whether a failure is a mint or a renewal is session state, not the
     // caller's business (docs/protocol.md step 4): once any session has
     // existed, every re-fetch is a renewal.
-    const fallback: DoolaAuthError['type'] = this.active ? 'renewal_failed' : 'mint_failed';
+    const renewal = this.active !== null;
 
     // Collapse concurrent callers (several components mounting at once,
     // or the proactive timer racing the 401 backstop) into one fetch.
-    return (this.pending ??= this.mint(fallback));
+    return (this.pending ??= this.mint(renewal));
   }
 
   // async on purpose: a synchronous throw from partner code becomes a
   // rejection, so the catch below — the only path that delivers onAuthError
   // and token-error — always runs.
-  private async mint(fallback: DoolaAuthError['type']): Promise<CustomerSession> {
+  private async mint(renewal: boolean): Promise<CustomerSession> {
     try {
       // Parsed, not trusted: this is the partner's own code and the second
       // untrusted boundary after the bus. A bad session here is not an error,
@@ -154,8 +199,9 @@ export class SessionManager {
     } catch (error: unknown) {
       if (this.stopped) throw error;
 
-      const type = classifyRejection(error, fallback);
-      this.onAuthError({ type, message: error instanceof Error ? error.message : String(error) });
+      const { type, shown } = classifyRejection(error, renewal);
+      const message = error instanceof Error ? error.message : String(error);
+      this.onAuthError({ error: { type, message }, shown });
 
       throw error;
     } finally {

@@ -126,38 +126,28 @@ value is a loud `AccessDenied`.
 
 ## Going live
 
-`js.doola.com` has no not-ready gate, unlike `sdk.doola.com`. Both answer 403
-today, but for reasons that behave differently: the app's comes from the
-`<env>-partner-sdk-shell-not-ready` CloudFront function and survives a deploy,
-while the loader's comes from an empty bucket and disappears the moment one
-runs. A production loader deploy is therefore the live switch, with that
+Neither `sdk.doola.com` nor `js.doola.com` has a not-ready gate: each serves
+whatever was last deployed to it, and each deploy verifies its own files from
+the edge. A production deploy is therefore the live switch, with that
 environment's required reviewer as the only thing in front of it.
 
-That is a decision rather than an oversight. The loader is inert alone — it
-injects an iframe against the SDK origin, which is still gated — so a blanket
-403 in front of it protects nothing, and it would break the edge verification
-that is the only proof a deploy actually reached anyone.
-
-What it does mean is that the launch order matters, because `@doola/js`
+The order still matters, because the two deploy independently and `@doola/js`
 hardcodes `https://js.doola.com/v1/doola.js`:
 
-1. Deploy the embedded app to production (doola-sdk-app). Still dark behind the
-   not-ready function.
-2. Deploy the loader to production, from here. `js.doola.com` goes live and
-   nothing points at it yet.
-3. Drop the not-ready function association on the app distribution, in
-   doolahq/infrastructure. The frame now renders.
-4. Publish `@doola/js`. Last, because it is the only irreversible step — a
-   version number, once used, can never be reused — and by then every URL it
+1. Deploy the embedded app to production (doola-sdk-app). It must already
+   understand every message the loader about to ship can send.
+2. Deploy the loader to production, from here.
+3. Publish `@doola/js`. Last, because it is the only irreversible step (a
+   version number, once used, can never be reused), and by then every URL it
    depends on is already serving.
 
-Publishing before step 2 hands the first partner who installs a 403 for the
-loader; before step 3, a frame that never renders.
+Publishing before step 2 hands the first partner who installs a loader that
+does not yet do what the new types promise.
 
 ### Cache behaviour
 
 `/v1/doola.js` is published with `max-age=300, must-revalidate` and the deploy
 waits for the CloudFront invalidation to complete. Five minutes is the window in
 which a browser still holds the previous loader after a fix; the edge is current
-before the workflow reports success. Do not make this immutable — the path is
+before the workflow reports success. Do not make this immutable: the path is
 the contract version, not a build id.

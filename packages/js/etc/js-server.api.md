@@ -29,6 +29,7 @@ export interface CustomerSessionResult {
         accessToken: string;
         expiresIn: number;
     } | null;
+    code?: string;
     failure?: CustomerSessionFailure;
     status: number;
 }

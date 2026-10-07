@@ -66,6 +66,8 @@ const oneOf = (values: readonly string[]) => {
 const AUTH_ERROR: Record<AuthErrorType, true> = {
   partner_session_expired: true,
   email_in_use: true,
+  external_id_conflict: true,
+  customer_revoked: true,
   mint_failed: true,
   renewal_failed: true,
 };

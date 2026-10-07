@@ -4,7 +4,11 @@
  * only then are the profile fields used.
  */
 export interface DoolaCustomer {
-  /** Matched after `externalCustomerId`, and the new customer's email when none matches. */
+  /**
+   * Matched after `externalCustomerId`, and the new customer's email when none
+   * matches. Send only an address your own auth has verified: doola resolves the
+   * customer from it, and the session route answers with doola's code for it.
+   */
   email: string;
 
   /**
@@ -30,7 +34,8 @@ export interface DoolaCustomer {
 /**
  * What the session route sends the browser: the status, and the JSON body when
  * there is one. `body` is set only with status 200, and carries exactly what
- * `fetchAccessToken` resolves with.
+ * `fetchAccessToken` resolves with. A failure carries `code` instead, when
+ * doola gave one.
  */
 export interface CustomerSessionResult {
   /** The status for the session route: doola's own, except that its 401 becomes a 502. */
@@ -39,12 +44,21 @@ export interface CustomerSessionResult {
   /** Set only with status 200. Send it as JSON, with `Cache-Control: no-store`. */
   body: { accessToken: string; expiresIn: number } | null;
 
+  /**
+   * doola's error code on a 409, such as `E_EMAIL_IN_USE`. Send it as the
+   * JSON body `{ code }` with `status`, so `fetchAccessToken` can reject with
+   * it: doola answers 409 for more than one reason, and the loader tells them
+   * apart by this code. Unlike `failure`, it is safe for the browser.
+   */
+  code?: string;
+
   /** Why `body` is null, for your logs. Never send it to the browser. */
   failure?: CustomerSessionFailure;
 }
 
 /**
- * Why a session could not be minted. The browser only ever sees the status, so
+ * Why a session could not be minted, for your logs. The browser sees the status,
+ * and doola's code when the route forwards {@link CustomerSessionResult.code}, so
  * this is the one place a bad key, an outage or a rejected field shows up.
  */
 export interface CustomerSessionFailure {
@@ -195,6 +209,16 @@ function failed(status: number, failure: CustomerSessionFailure): CustomerSessio
   return { status, body: null, failure };
 }
 
+// Only a 409 is about the customer. Every other code (the 401 and 403s about
+// the key or tenant, the 400s about the request) is the partner's to log.
+function refused(status: number, failure: CustomerSessionFailure): CustomerSessionResult {
+  const { doolaCode } = failure;
+
+  return status === 409 && doolaCode
+    ? { ...failed(status, failure), code: doolaCode }
+    : failed(status, failure);
+}
+
 async function mint(
   { apiKey, apiOrigin }: Credentials,
   customer: DoolaCustomer,
@@ -226,9 +250,9 @@ async function mint(
     // send a signed-in customer to the partner's login, on every renewal.
     if (doolaStatus === 401) return failed(502, { reason: 'doola_unauthorized', ...detail });
 
-    // Every other status passes through, so doola's 409 reaches the loader as
-    // email_in_use, and a status doola adds later needs no change here.
-    return failed(doolaStatus, { reason: 'doola_error', ...detail });
+    // Every other status passes through, a 409 with doola's code so the loader
+    // can tell them apart, and a status doola adds later needs no change here.
+    return refused(doolaStatus, { reason: 'doola_error', ...detail });
   }
 
   const body = sessionFrom(envelope);
@@ -243,10 +267,12 @@ async function mint(
 }
 
 // RFC 6749 section 5.1: a response carrying a token must not be cached.
-function respond(status: number, body: CustomerSessionResult['body']): Response {
-  if (!body) return new Response(null, { status, headers: { 'cache-control': 'no-store' } });
+function respond({ status, body, code }: CustomerSessionResult): Response {
+  const json = body ?? (code ? { code } : null);
 
-  return new Response(JSON.stringify(body), {
+  if (!json) return new Response(null, { status, headers: { 'cache-control': 'no-store' } });
+
+  return new Response(JSON.stringify(json), {
     status,
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
   });
@@ -255,8 +281,8 @@ function respond(status: number, body: CustomerSessionResult['body']): Response 
 /**
  * Mints a session for one customer and returns what the session route should
  * send, for Express, Fastify or your own routing. Send `status`, with `body` as
- * JSON when it is not null. {@link createSessionHandler} does this for a
- * web-standard route.
+ * JSON when it is not null, or `{ code }` as JSON when `code` is set (a 409).
+ * {@link createSessionHandler} does this for a web-standard route.
  *
  * Never rejects for a doola or network failure: those resolve to a status, with
  * `failure` saying why. It rejects only for a missing or invalid `apiKey`, which
@@ -287,12 +313,12 @@ export function createSessionHandler(
     const resolved = checked ?? credentials(apiKey);
     const customer = await getCustomer(request);
 
-    if (!customer) return respond(401, null);
+    if (!customer) return respond({ status: 401, body: null });
 
-    const { status, body, failure } = await mint(resolved, customer);
+    const result = await mint(resolved, customer);
 
-    if (failure) await onFailure?.(failure);
+    if (result.failure) await onFailure?.(result.failure);
 
-    return respond(status, body);
+    return respond(result);
   };
 }
