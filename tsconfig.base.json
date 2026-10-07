@@ -7,6 +7,9 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "types": [],
-    "noEmit": true
+    "noEmit": true,
+    // tsup's dts build sets baseUrl, which TypeScript 6 rejects (TS5101).
+    // Drop it with the typescript ignore in .github/dependabot.yml.
+    "ignoreDeprecations": "6.0"
   }
 }
