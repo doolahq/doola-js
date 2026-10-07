@@ -23,24 +23,30 @@ interface ActiveSession {
 
 /**
  * doola answers 409 for several reasons, so a 409 is named by the `code` the
- * rejection carries (FetchAccessToken docs). A Map, not an object: the code is
- * partner-supplied, and an object lookup would resolve `constructor` and
- * `__proto__`.
+ * rejection carries (FetchAccessToken docs).
  */
-const CONFLICTS: ReadonlyMap<unknown, DoolaAuthError['type']> = new Map([
+const CONFLICTS: ReadonlyMap<string, DoolaAuthError['type']> = new Map([
   ['E_EMAIL_IN_USE', 'email_in_use'],
   ['E_RESOURCE_CONFLICT', 'external_id_conflict'],
   ['E_CUSTOMER_REVOKED', 'customer_revoked'],
 ] as const);
 
 /**
- * What the partner's `onAuthError` is told, and the reason the frame shows.
- * They differ for one case only: a first-mint 409 with no `code`.
+ * doola's codes only. A client library puts its own `code` on a rejection
+ * (axios rejects a 409 with `ERR_BAD_REQUEST`), and that must not take a
+ * status-only route off the /v1 mapping.
  */
-export interface AuthFailure {
+const DOOLA_CODE = /^E_[A-Z0-9_]+$/;
+
+/** What the partner's `onAuthError` is told, and the reason the frame shows. */
+interface AuthFailure {
   error: DoolaAuthError;
   shown: DoolaAuthError['type'];
 }
+
+type Classified = { type: DoolaAuthError['type']; shown: DoolaAuthError['type'] };
+
+const same = (type: DoolaAuthError['type']): Classified => ({ type, shown: type });
 
 /**
  * The status→type mapping the loader owns (docs/protocol.md). The public
@@ -48,36 +54,35 @@ export interface AuthFailure {
  * exposing the HTTP `status`, and the `code` their route forwarded.
  * This is the implementer of that published rule.
  */
-function classifyRejection(error: unknown, renewal: boolean): DoolaAuthError['type'] {
+function classifyRejection(error: unknown, renewal: boolean): Classified {
   const { status, code } = rejection(error);
   const fallback = renewal ? 'renewal_failed' : 'mint_failed';
 
-  if (status === 401) return 'partner_session_expired';
-  if (status !== 409) return fallback;
+  if (status === 401) return same('partner_session_expired');
+  if (status !== 409) return same(fallback);
 
   // A route that forwards only the status, as every route did before the code
-  // existed. /v1 keeps reporting its first-mint 409 as email_in_use.
-  if (code === undefined) return renewal ? fallback : 'email_in_use';
+  // existed. /v1 keeps telling the partner email_in_use on the first mint, but
+  // the email may not be the cause, so the founder gets the neutral copy.
+  if (code === undefined) {
+    return renewal ? same(fallback) : { type: 'email_in_use', shown: 'mint_failed' };
+  }
 
   const conflict = CONFLICTS.get(code);
 
   // The contract promises email_in_use on the first mint only. Mid-session the
   // frame keeps working until the token expires, which renewal_failed says.
-  if (conflict === 'email_in_use' && renewal) return fallback;
+  if (conflict === 'email_in_use' && renewal) return same(fallback);
 
-  return conflict ?? fallback;
+  return same(conflict ?? fallback);
 }
 
-/**
- * The frame shows the email copy only when doola said the email is the
- * problem. Without a code it may not be, so the founder gets the neutral one.
- */
-function shownInFrame(error: unknown, type: DoolaAuthError['type']): DoolaAuthError['type'] {
-  return type === 'email_in_use' && rejection(error).code === undefined ? 'mint_failed' : type;
-}
+function rejection(error: unknown): { status?: unknown; code?: string } {
+  if (typeof error !== 'object' || error === null) return {};
 
-function rejection(error: unknown): { status?: unknown; code?: unknown } {
-  return typeof error === 'object' && error !== null ? error : {};
+  const { status, code } = error as { status?: unknown; code?: unknown };
+
+  return typeof code === 'string' && DOOLA_CODE.test(code) ? { status, code } : { status };
 }
 
 /**
@@ -194,9 +199,9 @@ export class SessionManager {
     } catch (error: unknown) {
       if (this.stopped) throw error;
 
-      const type = classifyRejection(error, renewal);
+      const { type, shown } = classifyRejection(error, renewal);
       const message = error instanceof Error ? error.message : String(error);
-      this.onAuthError({ error: { type, message }, shown: shownInFrame(error, type) });
+      this.onAuthError({ error: { type, message }, shown });
 
       throw error;
     } finally {

@@ -71,7 +71,7 @@ describe('parseAppMessage', () => {
 
   it('marks only the terminal auth cases as not retryable', () => {
     const retryable = (type: Parameters<typeof tokenError>[0]['type']) =>
-      tokenError({ type, message: '' }).payload.retryable;
+      tokenError({ type, message: '' }, type).payload.retryable;
 
     expect(retryable('partner_session_expired')).toBe(false);
     expect(retryable('email_in_use')).toBe(false);

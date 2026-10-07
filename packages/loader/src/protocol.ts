@@ -54,7 +54,8 @@ export type LoaderMessage =
 export type Envelope = LoaderMessage & { v: number };
 
 /**
- * Whether the loader will keep renewing on its own after this failure.
+ * Whether the failure is not final: a `token-request` or a new mount fetches
+ * again (the loader schedules no retry of its own).
  * Exhaustive over the contract's union so a new case is a compile error
  * here rather than a silent "retryable".
  */
@@ -210,7 +211,7 @@ export function parseSession(value: unknown): CustomerSession {
  */
 export function tokenError(
   error: DoolaAuthError,
-  shown: DoolaAuthError['type'] = error.type,
+  shown: DoolaAuthError['type'],
 ): Extract<LoaderMessage, { type: 'token-error' }> {
   return {
     type: 'token-error',

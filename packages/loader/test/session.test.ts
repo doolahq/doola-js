@@ -155,7 +155,6 @@ describe('SessionManager', () => {
 
   it.each([
     ['an unknown code', { status: 409, code: 'E_SOMETHING_NEW' }],
-    ['a prototype key as code', { status: 409, code: 'constructor' }],
     ['a known code on another status', { status: 400, code: 'E_EMAIL_IN_USE' }],
   ])('maps a rejection with %s to mint_failed', async (_, rejection) => {
     const onAuthError = vi.fn();
@@ -172,6 +171,18 @@ describe('SessionManager', () => {
       onAuthError,
       vi.fn(),
     );
+
+    await expect(manager.current()).rejects.toBeDefined();
+    expect(onAuthError).toHaveBeenCalledWith(failure('email_in_use', 'mint_failed'));
+  });
+
+  it.each([
+    ['an axios error', { status: 409, code: 'ERR_BAD_REQUEST' }],
+    ['a null code', { status: 409, code: null }],
+    ['a prototype key as code', { status: 409, code: 'constructor' }],
+  ])('reads a first-mint 409 with %s as one without a code', async (_, rejection) => {
+    const onAuthError = vi.fn();
+    const manager = new SessionManager(vi.fn().mockRejectedValue(rejection), onAuthError, vi.fn());
 
     await expect(manager.current()).rejects.toBeDefined();
     expect(onAuthError).toHaveBeenCalledWith(failure('email_in_use', 'mint_failed'));
