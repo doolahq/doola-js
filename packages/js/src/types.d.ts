@@ -83,7 +83,8 @@ export type FetchAccessToken = () => Promise<CustomerSession>;
  *
  * - `email_in_use`: the email the route sent cannot be this customer's
  *   (`E_EMAIL_IN_USE`): it belongs to a doola account outside the
- *   partner's tenant, or to another account it would be renamed onto. Also any
+ *   partner's tenant, to a non-customer login such as a partner-portal
+ *   user, or to another account it would be renamed onto. Also any
  *   first-mint 409 whose rejection carries no `code`, from a route that
  *   forwards only the status; the frame then shows its generic failure,
  *   since the email may not be the cause. First mint only: on renewal a

@@ -121,6 +121,8 @@ const doola = await loadDoola({
   onAuthError: (error) => {
     if (error.type === 'partner_session_expired') location.assign('/login');
     if (error.type === 'email_in_use' || error.type === 'customer_revoked') showSupportMessage();
+    // Your mapping between users and externalCustomerId, not the customer's to fix.
+    if (error.type === 'external_id_conflict') console.error('doola session conflict', error);
   },
 
   // The customer submitted the wizard. Start your checkout for this company.

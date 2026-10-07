@@ -143,3 +143,11 @@ hardcodes `https://js.doola.com/v1/doola.js`:
 
 Publishing before step 2 hands the first partner who installs a loader that
 does not yet do what the new types promise.
+
+### Cache behaviour
+
+`/v1/doola.js` is published with `max-age=300, must-revalidate` and the deploy
+waits for the CloudFront invalidation to complete. Five minutes is the window in
+which a browser still holds the previous loader after a fix; the edge is current
+before the workflow reports success. Do not make this immutable: the path is
+the contract version, not a build id.
