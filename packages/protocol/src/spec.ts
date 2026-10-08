@@ -165,6 +165,9 @@ export const LOADER_SPEC: SpecOf<LoaderMessage> = {
   update: {
     locale: { accepts: optional(isString) },
     appearance: { accepts: optional(isAppearance) },
+    // Any string, not one of PreviewSurface: the preview resolves a name it
+    // does not know, where refusing it here would drop the branding with it.
+    preview: { accepts: optional(isString) },
   },
   'token-error': {
     reason: { accepts: isAuthErrorType },

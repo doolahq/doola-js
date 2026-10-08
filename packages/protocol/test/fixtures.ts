@@ -27,7 +27,10 @@ export const LOADER_MESSAGES: {
     payload: { session, protocol: 1, locale: 'en', presentation: 'fullScreen' },
   },
   token: { type: 'token', payload: { session } },
-  update: { type: 'update', payload: { locale: 'es', appearance: { brand: '#F9C800' } } },
+  update: {
+    type: 'update',
+    payload: { locale: 'es', appearance: { brand: '#F9C800' }, preview: 'dashboard' },
+  },
   'token-error': {
     type: 'token-error',
     payload: { reason: 'renewal_failed', message: 'x', retryable: true },

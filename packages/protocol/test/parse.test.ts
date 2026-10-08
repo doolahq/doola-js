@@ -116,6 +116,31 @@ describe('parseLoaderMessage payload rules', () => {
     ).not.toBeNull();
   });
 
+  it.each(['onboarding', 'dashboard', 'a-newer-surface'])(
+    'carries the preview surface %s, whatever the name',
+    (preview) => {
+      // The preview resolves an unknown name, so one this build has not met
+      // costs the surface, never the branding riding in the same update.
+      const update = parseLoaderMessage({
+        v: PROTOCOL_VERSION,
+        type: 'update',
+        payload: { appearance: { brand: '#F9C800' }, preview },
+      });
+
+      expect(update?.type === 'update' && update.payload.preview).toBe(preview);
+    },
+  );
+
+  // Each case wrapped, because `it.each` spreads a row that is an array.
+  it.each([[1], [true], [null], [{}], [['dashboard']]])(
+    'drops the whole update, branding included, when preview is %j',
+    (preview) => {
+      const payload = { appearance: { brand: '#F9C800' }, preview };
+
+      expect(parseLoaderMessage({ v: PROTOCOL_VERSION, type: 'update', payload })).toBeNull();
+    },
+  );
+
   it.each(['__proto__', 'toString'])(
     'ignores %s, which is on Object.prototype rather than in the spec',
     (type) => {
