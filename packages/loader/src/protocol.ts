@@ -54,8 +54,9 @@ export type LoaderMessage =
 export type Envelope = LoaderMessage & { v: number };
 
 /**
- * Whether the failure is not final: a `token-request` or a new mount fetches
- * again (the loader schedules no retry of its own).
+ * Whether the failure is not final: a `token-request` (before `init`, a
+ * `ready`) or a new mount fetches again (the loader schedules no retry of its
+ * own).
  * Exhaustive over the contract's union so a new case is a compile error
  * here rather than a silent "retryable".
  */
