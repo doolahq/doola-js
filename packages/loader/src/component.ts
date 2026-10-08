@@ -150,7 +150,8 @@ export class FrameController {
     const iframe = document.createElement('iframe');
 
     iframe.src = `${this.config.sdkOrigin}/?pk=${encodeURIComponent(this.config.publishableKey)}`;
-    iframe.title = 'doola';
+    // White-labeled: a screen reader announces this name on the partner's page.
+    iframe.title = 'Company formation';
     iframe.allow = 'clipboard-write';
     iframe.style.cssText = INLINE_FRAME_CSS;
 
