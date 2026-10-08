@@ -79,7 +79,9 @@ function init(options: DoolaOptions): Doola {
       broadcast(tokenError(error, shown));
       onAuthError(error);
     },
-    (session) => broadcast({ type: 'token', payload: { session } }),
+    (session) => {
+      for (const frame of mounted) frame.deliver(session);
+    },
   );
 
   defineElementOnce();

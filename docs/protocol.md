@@ -116,7 +116,7 @@ peer".
 | type           | payload                                                      | since | notes                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------- | ------------------------------------------------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `init`         | `{ session, appearance?, locale?, protocol, presentation? }` | 1     | the reply to `ready` that carries a session; `token-error` (step 4), `presentation` and `update` can arrive before it; `appearance` is parsed and ignored, see below; `presentation` is the frame's mode at handshake time, absent only from a loader older than the field                                                                                                                  |
-| `token`        | `{ session }`                                                | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                                                                                                                                           |
+| `token`        | `{ session }`                                                | 1     | renewal result, to a frame that has had `init` (one still waiting gets `init`, step 4); also the reply to `token-request`                                                                                                                                                                                                                                                                   |
 | `update`       | `{ appearance?, locale?, preview? }`                         | 1     | runtime `update()` call, see below; `appearance` and `preview` are read only by the preview peer, see "The preview peer"                                                                                                                                                                                                                                                                    |
 | `token-error`  | `{ reason, message, retryable }`                             | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type, except a first-mint 409 with no `code` (step 4); `retryable: true` means the failure is not final: a `token-request` (before `init`, a `ready`) or a new mount fetches again (the loader schedules no retry of its own); the frame may ask in either case, for terminal ones only after the user has acted outside it |
 | `presentation` | `{ mode }`                                                   | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                                                                                                                                             |
@@ -227,7 +227,8 @@ living in the partner's page).
    deriving remaining life as `Date.parse(expiresAt) − Date.now()` mixes the
    server clock into the end user's device clock and is rejected for exactly
    that reason. Never computed from decoding the JWT.
-2. On fire, loader calls `fetchAccessToken()` and posts `token` in.
+2. On fire, loader calls `fetchAccessToken()` and posts `token` in, or `init`
+   to a frame still waiting for one (step 4).
 3. Reactive backstop: app hits a 401 (throttled timers in backgrounded tabs),
    posts `token-request`, loader renews on demand. The reply is `token` — or,
    when the renewal cannot succeed, `token-error` (step 4), so the frame is
@@ -271,12 +272,15 @@ living in the partner's page).
    its retry rather than `token-request`. The loader
    answers every `ready`, not only the first, by asking for the current
    session: with none fresh it mints again and replies with `init`, or the
-   failure arrives as another `token-error`. As with `token-request`, a
-   terminal reason may be retried only after the user has acted outside the
-   frame. A retryable one may be retried when the user asks, never on a timer,
-   since each `ready` can cost a round trip through the partner's server. That
-   `ready` goes to the origin the `token-error` came from, not to `"*"` (see
-   "Origin and source checks").
+   failure arrives as another `token-error`. Until a frame has had `init` for
+   its latest `ready`, a session from any fetch that succeeds, its own or any
+   other, reaches it as `init`, never as `token`, so a frame waiting after a
+   `token-error` is let in by another frame's retry without asking again. As
+   with `token-request`, a terminal reason may be retried only after the user
+   has acted outside the frame. A retryable one may be retried when the user
+   asks, never on a timer, since each `ready` can cost a round trip through
+   the partner's server. That `ready` goes to the origin the `token-error`
+   came from, not to `"*"` (see "Origin and source checks").
 
    Semantics and the partner's expected response are owned by the contract
    (see `DoolaAuthError`).

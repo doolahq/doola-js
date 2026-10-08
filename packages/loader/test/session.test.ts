@@ -37,7 +37,7 @@ describe('SessionManager', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('renews proactively at 80% of expiresIn once resumed, and broadcasts', async () => {
+  it('renews proactively at 80% of expiresIn once resumed, and hands each session on', async () => {
     const fetch = vi.fn().mockResolvedValue(session(TEN_MINUTES_S));
     const onSession = vi.fn();
     const manager = new SessionManager(fetch, vi.fn(), onSession);

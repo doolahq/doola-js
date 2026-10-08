@@ -1,4 +1,4 @@
-import type { DoolaOptions } from '@doola/js';
+import type { CustomerSession, DoolaOptions } from '@doola/js';
 
 import {
   LOAD_BACKSTOP_MS,
@@ -130,6 +130,11 @@ export class FrameController {
    * navigated to the SDK origin — null until then.
    */
   private protocol: number | null = null;
+  /**
+   * Whether the frame has had `init` since its last `ready`. Until it has, a
+   * session reaches it as `init`, not `token`.
+   */
+  private initialized = false;
 
   constructor(
     private readonly host: DoolaElement,
@@ -287,6 +292,31 @@ export class FrameController {
     );
   }
 
+  /**
+   * A session for this frame: `init` while the frame is owed one for its last
+   * `ready`, `token` after. A frame that is waiting must never be left with a
+   * session and no handshake (docs/protocol.md, step 4).
+   */
+  deliver(session: CustomerSession): void {
+    if (this.protocol === null) return;
+
+    if (this.initialized) {
+      this.post({ type: 'token', payload: { session } });
+      return;
+    }
+
+    this.initialized = true;
+    this.post({
+      type: 'init',
+      payload: {
+        session,
+        protocol: this.protocol,
+        presentation: this.presentationMode,
+        locale: this.config.state.locale,
+      },
+    });
+  }
+
   private get presentationMode(): 'inline' | 'fullScreen' {
     return this.restoreStyles ? 'fullScreen' : 'inline';
   }
@@ -310,8 +340,10 @@ export class FrameController {
       case 'ready': {
         // Set before the first post: `post` refuses to send until it is, and
         // every outbound `v` from here on is the version it settles.
-        const protocol = negotiate(message.payload.protocolMax);
-        this.protocol = protocol;
+        this.protocol = negotiate(message.payload.protocolMax);
+        // Every `ready` is owed an `init`, not only the first: a document
+        // reloaded inside this mount starts again from nothing.
+        this.initialized = false;
         this.clearReadyDeadline();
 
         // A `ready` after a report is a recovery, and the frame is entitled to
@@ -324,19 +356,14 @@ export class FrameController {
 
         // Rejection swallowed: the partner hears via onAuthError and this
         // frame via token-error (both from the manager's failure callback).
+        // A successful fetch has already delivered to every mounted frame when
+        // this runs, so this sends `init` only when a fresh session needed no
+        // fetch.
         void this.config.sessions
           .current()
-          .then((session) =>
-            this.post({
-              type: 'init',
-              payload: {
-                session,
-                protocol,
-                presentation: this.presentationMode,
-                locale: this.config.state.locale,
-              },
-            }),
-          )
+          .then((session) => {
+            if (!this.initialized) this.deliver(session);
+          })
           .catch(() => {});
         break;
       }
