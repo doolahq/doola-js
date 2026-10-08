@@ -65,13 +65,17 @@ const PAST_BACKSTOP_MS = LOAD_BACKSTOP_MS + 1_000;
 
 async function mount(
   page: Page,
-  options: { viewport?: { width: number; height: number }; mintFails?: boolean } = {},
+  options: {
+    viewport?: { width: number; height: number };
+    mintFails?: boolean;
+    mintDelayMs?: number;
+  } = {},
 ): Promise<void> {
   await page.setViewportSize(options.viewport ?? WIDE);
   await page.goto(harness.partnerOrigin);
 
   await page.evaluate(
-    ({ sdkOrigin, mintFails }) => {
+    ({ sdkOrigin, mintFails, mintDelayMs }) => {
       const w = window as unknown as PartnerWindow;
       w.__events = [];
       w.__mintFails = mintFails;
@@ -84,9 +88,16 @@ async function mount(
           w.__mints += 1;
 
           // A 5xx from the partner's route, which the loader reports as mint_failed.
-          return w.__mintFails
-            ? Promise.reject(Object.assign(new Error('mint failed'), { status: 503 }))
-            : Promise.resolve({ accessToken: 'cs_harness', expiresIn: 3600 });
+          if (w.__mintFails) {
+            return Promise.reject(Object.assign(new Error('mint failed'), { status: 503 }));
+          }
+
+          const session = { accessToken: 'cs_harness', expiresIn: 3600 };
+
+          // No timer unless asked for: several tests freeze the clock.
+          return mintDelayMs > 0
+            ? new Promise((resolve) => setTimeout(() => resolve(session), mintDelayMs))
+            : Promise.resolve(session);
         },
         onAuthError: (error) => w.__events.push({ handler: 'onAuthError', error }),
         onFormed: (event) => w.__events.push({ handler: 'onFormed', event }),
@@ -98,7 +109,11 @@ async function mount(
       w.__element = w.__instance.create();
       document.getElementById('mount')?.appendChild(w.__element);
     },
-    { sdkOrigin: harness.sdkOrigin, mintFails: options.mintFails ?? false },
+    {
+      sdkOrigin: harness.sdkOrigin,
+      mintFails: options.mintFails ?? false,
+      mintDelayMs: options.mintDelayMs ?? 0,
+    },
   );
 }
 
@@ -161,6 +176,11 @@ async function eventsOf(page: Page, handler: string): Promise<PartnerEvent[]> {
   const events = await page.evaluate(() => (window as unknown as PartnerWindow).__events);
 
   return events.filter((event) => event.handler === handler);
+}
+
+/** Every frame the loader has mounted that has navigated to the SDK origin. */
+function sdkFrames(page: Page): Frame[] {
+  return page.frames().filter((frame) => frame.url().startsWith(harness.sdkOrigin + '/'));
 }
 
 /** How many times the loader has called the partner's `fetchAccessToken`. */
@@ -319,6 +339,64 @@ test('a frame mounted after the session went stale retries a failed renewal with
     (window as unknown as PartnerWindow).__mintFails = false;
   });
   await sendFromApp(frame, ready, harness.partnerOrigin);
+
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+});
+
+test('a frame still waiting for its first session gets init when a sibling retry mints', async ({
+  page,
+}) => {
+  await mount(page, { mintFails: true });
+  await page.evaluate(() => {
+    const w = window as unknown as PartnerWindow;
+    document.getElementById('mount')?.appendChild(w.__instance.create());
+  });
+  await expect.poll(() => sdkFrames(page).length).toBe(2);
+
+  const [first, second] = sdkFrames(page) as [Frame, Frame];
+  for (const frame of [first, second]) {
+    await frame.waitForFunction(() => Array.isArray((window as unknown as AppWindow).__received));
+    await sendFromApp(frame, ready);
+    await expect.poll(() => countOfType(frame, 'token-error')).toBeGreaterThan(0);
+  }
+
+  await page.evaluate(() => {
+    (window as unknown as PartnerWindow).__mintFails = false;
+  });
+  await sendFromApp(first, ready, harness.partnerOrigin);
+
+  await expect.poll(() => countOfType(first, 'init')).toBe(1);
+  await expect.poll(() => countOfType(second, 'init')).toBe(1);
+  expect(await countOfType(second, 'token'), 'a session before init is init').toBe(0);
+});
+
+test('a ready that lands while the first mint is in flight gets init and no token', async ({
+  page,
+}) => {
+  await mount(page, { mintDelayMs: 1_000 });
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+
+  await expect.poll(() => countOfType(frame, 'init'), { timeout: 5_000 }).toBe(1);
+  await expectFreshHandshake(frame);
+  expect(await countOfType(frame, 'token')).toBe(0);
+});
+
+test('a document reloaded inside the frame gets init for its ready', async ({ page }) => {
+  await mount(page);
+  const frame = await handshake(page);
+
+  const reloaded = page.waitForEvent('framenavigated', (navigated) => navigated === frame);
+  await frame.evaluate(() => {
+    // Deferred, so the evaluate returns before its context goes away.
+    setTimeout(() => location.reload(), 0);
+  });
+  await reloaded;
+  await frame.waitForFunction(() => Array.isArray((window as unknown as AppWindow).__received));
+  expect(await countOfType(frame, 'init'), 'the reloaded document starts from nothing').toBe(0);
+
+  await sendFromApp(frame, ready);
 
   await expect.poll(() => countOfType(frame, 'init')).toBe(1);
 });

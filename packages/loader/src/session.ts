@@ -89,7 +89,7 @@ function rejection(error: unknown): { status?: unknown; code?: string } {
  * Owns the one session shared by every component of a Doola instance.
  * The embedded app cannot renew — fetchAccessToken is partner code
  * living in the partner's page — so renewal always happens here and the
- * fresh token is broadcast into every mounted frame.
+ * fresh session reaches every mounted frame.
  *
  * All expiry arithmetic is `expiresIn` relative to the local receipt
  * time — one clock, so client clock skew cannot mistime a renewal
