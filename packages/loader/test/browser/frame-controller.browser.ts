@@ -368,19 +368,38 @@ test('a frame still waiting for its first session gets init when a sibling retry
   await expect.poll(() => countOfType(first, 'init')).toBe(1);
   await expect.poll(() => countOfType(second, 'init')).toBe(1);
   expect(await countOfType(second, 'token'), 'a session before init is init').toBe(0);
+  expect(await countOfType(first, 'token'), 'the retry that minted is answered once').toBe(0);
 });
 
 test('a ready that lands while the first mint is in flight gets init and no token', async ({
   page,
 }) => {
+  await freezeClock(page);
   await mount(page, { mintDelayMs: 1_000 });
   const frame = await appFrame(page);
 
+  // Posted after ready on the same channel, so once its height lands the loader
+  // has handled ready, and the frozen clock still holds the mint.
   await sendFromApp(frame, ready);
+  await sendFromApp(frame, { v: PROTOCOL_VERSION, type: 'resize', payload: { height: 321 } });
+  await expect.poll(() => frameHeight(page)).toBe('321px');
+  expect(await countOfType(frame, 'init'), 'the mint is still in flight').toBe(0);
 
-  await expect.poll(() => countOfType(frame, 'init'), { timeout: 5_000 }).toBe(1);
+  await page.clock.fastForward(1_000);
+
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
   await expectFreshHandshake(frame);
   expect(await countOfType(frame, 'token')).toBe(0);
+});
+
+test('a frame that has had init gets a renewal as token, not another init', async ({ page }) => {
+  await mount(page);
+  const frame = await handshake(page);
+
+  await sendFromApp(frame, { v: PROTOCOL_VERSION, type: 'token-request', payload: {} });
+
+  await expect.poll(() => countOfType(frame, 'token')).toBe(1);
+  expect(await countOfType(frame, 'init')).toBe(1);
 });
 
 test('a document reloaded inside the frame gets init for its ready', async ({ page }) => {
