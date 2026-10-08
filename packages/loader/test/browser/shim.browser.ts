@@ -103,6 +103,7 @@ test('resolves with the real loader, whose create() mounts the app frame', async
   expect(await load(page)).toEqual({ loaded: true });
 
   await mountFrame(page);
+  await expect(page.locator('#mount doola-embed iframe')).toHaveAccessibleName('Company formation');
 });
 
 const failures = {
