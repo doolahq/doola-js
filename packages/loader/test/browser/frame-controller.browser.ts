@@ -35,6 +35,8 @@ interface PartnerWindow extends Window {
   __events: PartnerEvent[];
   __instance: Doola;
   __element: HTMLElement;
+  __mintFails: boolean;
+  __mints: number;
 }
 
 interface AppWindow extends Window {
@@ -63,29 +65,41 @@ const PAST_BACKSTOP_MS = LOAD_BACKSTOP_MS + 1_000;
 
 async function mount(
   page: Page,
-  options: { viewport?: { width: number; height: number } } = {},
+  options: { viewport?: { width: number; height: number }; mintFails?: boolean } = {},
 ): Promise<void> {
   await page.setViewportSize(options.viewport ?? WIDE);
   await page.goto(harness.partnerOrigin);
 
-  await page.evaluate((sdkOrigin) => {
-    const w = window as unknown as PartnerWindow;
-    w.__events = [];
+  await page.evaluate(
+    ({ sdkOrigin, mintFails }) => {
+      const w = window as unknown as PartnerWindow;
+      w.__events = [];
+      w.__mintFails = mintFails;
+      w.__mints = 0;
 
-    const options: DoolaOptions = {
-      publishableKey: 'pk_test_harness',
-      origin: sdkOrigin,
-      fetchAccessToken: () => Promise.resolve({ accessToken: 'cs_harness', expiresIn: 3600 }),
-      onAuthError: (error) => w.__events.push({ handler: 'onAuthError', error }),
-      onFormed: (event) => w.__events.push({ handler: 'onFormed', event }),
-      onLoadError: (error) => w.__events.push({ handler: 'onLoadError', error }),
-      onLoaderStart: () => w.__events.push({ handler: 'onLoaderStart' }),
-    };
+      const options: DoolaOptions = {
+        publishableKey: 'pk_test_harness',
+        origin: sdkOrigin,
+        fetchAccessToken: () => {
+          w.__mints += 1;
 
-    w.__instance = w.Doola!.init(options);
-    w.__element = w.__instance.create();
-    document.getElementById('mount')?.appendChild(w.__element);
-  }, harness.sdkOrigin);
+          // A 5xx from the partner's route, which the loader reports as mint_failed.
+          return w.__mintFails
+            ? Promise.reject(Object.assign(new Error('mint failed'), { status: 503 }))
+            : Promise.resolve({ accessToken: 'cs_harness', expiresIn: 3600 });
+        },
+        onAuthError: (error) => w.__events.push({ handler: 'onAuthError', error }),
+        onFormed: (event) => w.__events.push({ handler: 'onFormed', event }),
+        onLoadError: (error) => w.__events.push({ handler: 'onLoadError', error }),
+        onLoaderStart: () => w.__events.push({ handler: 'onLoaderStart' }),
+      };
+
+      w.__instance = w.Doola!.init(options);
+      w.__element = w.__instance.create();
+      document.getElementById('mount')?.appendChild(w.__element);
+    },
+    { sdkOrigin: harness.sdkOrigin, mintFails: options.mintFails ?? false },
+  );
 }
 
 /** Intercepts the frame document, so a test states its own failure mode. */
@@ -127,10 +141,13 @@ function received(frame: Frame): Promise<Wire[]> {
   return frame.evaluate(() => (window as unknown as AppWindow).__received);
 }
 
-function sendFromApp(frame: Frame, message: unknown): Promise<void> {
-  return frame.evaluate((m) => {
-    (window as unknown as AppWindow).__send(m, '*');
-  }, message);
+function sendFromApp(frame: Frame, message: unknown, targetOrigin = '*'): Promise<void> {
+  return frame.evaluate(
+    ({ m, o }) => {
+      (window as unknown as AppWindow).__send(m, o);
+    },
+    { m: message, o: targetOrigin },
+  );
 }
 
 function countOfType(frame: Frame, type: string): Promise<number> {
@@ -144,6 +161,11 @@ async function eventsOf(page: Page, handler: string): Promise<PartnerEvent[]> {
   const events = await page.evaluate(() => (window as unknown as PartnerWindow).__events);
 
   return events.filter((event) => event.handler === handler);
+}
+
+/** How many times the loader has called the partner's `fetchAccessToken`. */
+function mints(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as PartnerWindow).__mints);
 }
 
 async function handshake(page: Page): Promise<Frame> {
@@ -234,6 +256,71 @@ test('init carries the negotiated protocol and the presentation mode', async ({ 
   expect(payload.protocol).toBe(PROTOCOL_VERSION);
   expect(payload.presentation).toBe('inline');
   expect((payload.session as Record<string, unknown>).accessToken).toBe('cs_harness');
+});
+
+test('a ready sent again after a failed first mint mints afresh and gets init', async ({
+  page,
+}) => {
+  await mount(page, { mintFails: true });
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBe(1);
+
+  const tokenError = (await received(frame)).find((m) => m.data.type === 'token-error');
+  expect(tokenError?.data.payload).toEqual({
+    reason: 'mint_failed',
+    message: 'mint failed',
+    retryable: true,
+  });
+  expect(tokenError?.origin).toBe(harness.partnerOrigin);
+  expect(await countOfType(frame, 'init')).toBe(0);
+
+  const mintsBefore = await mints(page);
+  await page.evaluate(() => {
+    (window as unknown as PartnerWindow).__mintFails = false;
+  });
+
+  // To the origin the token-error came from, where docs/protocol.md sends a second ready.
+  await sendFromApp(frame, ready, harness.partnerOrigin);
+
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+  expect(await mints(page), 'the retry is a fresh mint, not the failed one replayed').toBe(
+    mintsBefore + 1,
+  );
+  expect(await countOfType(frame, 'token-error')).toBe(1);
+});
+
+test('a frame mounted after the session went stale retries a failed renewal with ready', async ({
+  page,
+}) => {
+  await freezeClock(page);
+  await mount(page);
+  await handshake(page);
+
+  // Unmounted, the manager is paused, so nothing renews while the session goes stale.
+  await page.evaluate(() => (window as unknown as PartnerWindow).__element.remove());
+  await page.clock.fastForward(60 * 60_000);
+  await page.evaluate(() => {
+    const w = window as unknown as PartnerWindow;
+    w.__mintFails = true;
+    document.getElementById('mount')?.appendChild(w.__element);
+  });
+
+  const frame = await appFrame(page);
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBe(1);
+
+  const tokenError = (await received(frame)).find((m) => m.data.type === 'token-error');
+  expect(tokenError?.data.payload).toMatchObject({ reason: 'renewal_failed', retryable: true });
+  expect(await countOfType(frame, 'init')).toBe(0);
+
+  await page.evaluate(() => {
+    (window as unknown as PartnerWindow).__mintFails = false;
+  });
+  await sendFromApp(frame, ready, harness.partnerOrigin);
+
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
 });
 
 test('a viewport crossing the breakpoint sends the presentation transition', async ({ page }) => {

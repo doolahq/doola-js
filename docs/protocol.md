@@ -54,7 +54,7 @@ maximum: once `init` has settled it, every later message from either side
 carries the negotiated value. This is what makes the receive rule coherent —
 each side drops anything whose `v` is above its own maximum, which would
 otherwise reject its peer's traffic immediately after a successful downgrade.
-Before `init` only `ready` exists, and it carries the app's maximum because
+Before `init` the app sends only `ready`, and it carries the app's maximum because
 that is the number being negotiated with. The preview peer has no `init`: there
 `update` and `resize` flow without one, the portal picks the version of each
 `update`, no higher than the `protocolMax` that `ready` announced, and the
@@ -75,25 +75,29 @@ half-understood.
     attributes a message to the right frame.
   - `event.origin` equals the SDK origin.
 - The **app** accepts messages only from the partner origin `init` arrived from,
-  and posts back to exactly that origin. The preview document, which never
-  receives `init`, locks onto the origin of its first valid `update` instead
-  (see "The preview peer").
+  and posts back to exactly that origin. Before `init`, it accepts only messages
+  whose `source` is its parent window, from any origin. The preview document,
+  which never receives `init`, locks onto the origin of its first valid `update`
+  instead (see "The preview peer").
 - `"*"` as a target origin is forbidden, with one rule-shaped carve-out: a
   message MAY target `"*"` only when it is sent before the peer origin is
   knowable AND carries no session, token, or customer data. `ready` is
   currently the only message that passes that test — it is the app's first
   message, sent before anything has told the app the partner origin
   (cross-origin, it cannot read `parent.location.origin`), and it carries only
-  `protocolMax`. The app then locks onto the origin `init` came from. A future
-  message wanting `"*"` must pass the same predicate, not argue by analogy to
-  `ready`. All of this holds regardless of same-origin API routing: postMessage
-  origin checking is a different mechanism from CORS.
+  `protocolMax`. The app then locks onto the origin `init` came from. A `ready`
+  sent again after a `token-error` (see "Token renewal") no longer passes: the
+  frame has heard from its parent by then, so it posts to the origin that
+  `token-error` came from. A future message wanting `"*"` must pass the same
+  predicate, not argue by analogy to `ready`. All of this holds regardless of
+  same-origin API routing: postMessage origin checking is a different
+  mechanism from CORS.
 
 ## Messages: app → loader
 
 | type               | payload                                             | since | notes                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------ | --------------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ready`            | `{ protocolMax: int ≥ 1 }`                          | 1     | app booted; the one message allowed targetOrigin `"*"`; loader replies with `init`                                                                                                                                                                                                                                                                                                                                                      |
+| `ready`            | `{ protocolMax: int ≥ 1 }`                          | 1     | app booted; the one message allowed targetOrigin `"*"`, when first sent; loader answers every `ready` with `init`, or with `token-error` when no session can be had, so a frame retries a failed first session with another `ready` (see "Token renewal")                                                                                                                                                                               |
 | `resize`           | `{ height: number ≥ 0 }`                            | 1     | from a ResizeObserver on the app root; coalesced to one post per animation frame, skipped when equal to the last posted height or when it is 0, which is what a hidden document measures and which the loader never applies. The loader sizes the inline frame to a placeholder until the first one arrives — the app cannot measure before it is connected, and a frame at 0px shows nothing while it boots, fails to mint, or crashes |
 | `scroll-request`   | `{ top: number }`                                   | 1     | app asks the parent page to scroll a point into view                                                                                                                                                                                                                                                                                                                                                                                    |
 | `token-request`    | `{}`                                                | 1     | backstop path: app got a 401 mid-session                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -111,10 +115,10 @@ peer".
 
 | type           | payload                                                      | since | notes                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------- | ------------------------------------------------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `init`         | `{ session, appearance?, locale?, protocol, presentation? }` | 1     | first message after `ready`; `appearance` is parsed and ignored, see below; `presentation` is the frame's mode at handshake time, absent only from a loader older than the field                                                                                                                                                                                                            |
+| `init`         | `{ session, appearance?, locale?, protocol, presentation? }` | 1     | the reply to `ready` that carries a session; `token-error` (step 4), `presentation` and `update` can arrive before it; `appearance` is parsed and ignored, see below; `presentation` is the frame's mode at handshake time, absent only from a loader older than the field                                                                                                                  |
 | `token`        | `{ session }`                                                | 1     | renewal result; also the reply to `token-request`                                                                                                                                                                                                                                                                                                                                           |
 | `update`       | `{ appearance?, locale?, preview? }`                         | 1     | runtime `update()` call, see below; `appearance` and `preview` are read only by the preview peer, see "The preview peer"                                                                                                                                                                                                                                                                    |
-| `token-error`  | `{ reason, message, retryable }`                             | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type, except a first-mint 409 with no `code` (step 4); `retryable: true` means the failure is not final: a `token-request` or a new mount fetches again (the loader schedules no retry of its own); the frame may send `token-request` in either case, for terminal reasons only after the user has acted outside the frame |
+| `token-error`  | `{ reason, message, retryable }`                             | 1     | a token could not be obtained; `reason` is the `DoolaAuthError` type, except a first-mint 409 with no `code` (step 4); `retryable: true` means the failure is not final: a `token-request` (before `init`, a `ready`) or a new mount fetches again (the loader schedules no retry of its own); the frame may ask in either case, for terminal ones only after the user has acted outside it |
 | `presentation` | `{ mode }`                                                   | 1     | inline ↔ fullScreen transitions                                                                                                                                                                                                                                                                                                                                                             |
 
 `update` carries the loader's **resolved** state, not the partner's raw call:
@@ -259,6 +263,20 @@ living in the partner's page).
    with the same `reason` except for a first-mint 409 with no `code`, so the app can render the state instead of hanging
    on an unanswered `token-request`. `onAuthError` fires each time as well —
    the contract makes it idempotent for that reason.
+
+   A fetch can fail before a frame has `init`: the instance's first mint
+   (`mint_failed`), or a renewal when the frame mounts after the session went
+   stale (`renewal_failed`). Either way its `token-error` reaches a frame with
+   no session to renew, which before `init` speaks only `ready`, so `ready` is
+   its retry rather than `token-request`. The loader
+   answers every `ready`, not only the first, by asking for the current
+   session: with none fresh it mints again and replies with `init`, or the
+   failure arrives as another `token-error`. As with `token-request`, a
+   terminal reason may be retried only after the user has acted outside the
+   frame. A retryable one may be retried when the user asks, never on a timer,
+   since each `ready` can cost a round trip through the partner's server. That
+   `ready` goes to the origin the `token-error` came from, not to `"*"` (see
+   "Origin and source checks").
 
    Semantics and the partner's expected response are owned by the contract
    (see `DoolaAuthError`).
