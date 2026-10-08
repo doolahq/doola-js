@@ -106,7 +106,7 @@ import { loadDoola } from '@doola/js';
 const doola = await loadDoola({
   publishableKey: 'pk_live_…',
 
-  // Called on mount and on every renewal. Always fetch a fresh session.
+  // Called on mount, on every renewal and on Try again. Always fetch a fresh session.
   fetchAccessToken: async () => {
     const r = await fetch('/doola-session', { method: 'POST' });
     if (!r.ok) {
