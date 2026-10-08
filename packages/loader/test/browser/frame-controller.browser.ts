@@ -291,6 +291,38 @@ test('a ready sent again after a failed first mint mints afresh and gets init', 
   expect(await countOfType(frame, 'token-error')).toBe(1);
 });
 
+test('a frame mounted after the session went stale retries a failed renewal with ready', async ({
+  page,
+}) => {
+  await freezeClock(page);
+  await mount(page);
+  await handshake(page);
+
+  // Unmounted, the manager is paused, so nothing renews while the session goes stale.
+  await page.evaluate(() => (window as unknown as PartnerWindow).__element.remove());
+  await page.clock.fastForward(60 * 60_000);
+  await page.evaluate(() => {
+    const w = window as unknown as PartnerWindow;
+    w.__mintFails = true;
+    document.getElementById('mount')?.appendChild(w.__element);
+  });
+
+  const frame = await appFrame(page);
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBe(1);
+
+  const tokenError = (await received(frame)).find((m) => m.data.type === 'token-error');
+  expect(tokenError?.data.payload).toMatchObject({ reason: 'renewal_failed', retryable: true });
+  expect(await countOfType(frame, 'init')).toBe(0);
+
+  await page.evaluate(() => {
+    (window as unknown as PartnerWindow).__mintFails = false;
+  });
+  await sendFromApp(frame, ready, harness.partnerOrigin);
+
+  await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+});
+
 test('a viewport crossing the breakpoint sends the presentation transition', async ({ page }) => {
   await mount(page, { viewport: WIDE });
   const frame = await handshake(page);
