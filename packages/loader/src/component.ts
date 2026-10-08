@@ -341,7 +341,10 @@ export class FrameController {
         break;
       }
       case 'resize':
-        if (this.iframe && !this.restoreStyles)
+        // A 0 is what a document hidden with `display: none` measures, and an
+        // app may report it as the frame is shown again: applied, it collapses
+        // the frame for a paint. The portal's preview ignores it the same way.
+        if (this.iframe && !this.restoreStyles && message.payload.height > 0)
           this.iframe.style.height = `${message.payload.height}px`;
         break;
       case 'scroll-request': {
