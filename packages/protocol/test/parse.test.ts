@@ -76,6 +76,11 @@ describe('parseLoaderMessage payload rules', () => {
     ['protocol is zero', 'init', { session, protocol: 0 }],
     ['locale is not a string', 'update', { locale: 42 }],
     ['appearance is an array', 'update', { appearance: ['#fff'] }],
+    ['preview is a number', 'update', { appearance: { brand: '#F9C800' }, preview: 1 }],
+    ['preview is a boolean', 'update', { appearance: { brand: '#F9C800' }, preview: true }],
+    ['preview is null', 'update', { appearance: { brand: '#F9C800' }, preview: null }],
+    ['preview is an object', 'update', { appearance: { brand: '#F9C800' }, preview: {} }],
+    ['preview is an array', 'update', { appearance: { brand: '#F9C800' }, preview: ['dashboard'] }],
     ['retryable is missing', 'token-error', { reason: 'mint_failed', message: 'x' }],
     [
       'reason is not a contract case',
@@ -115,6 +120,19 @@ describe('parseLoaderMessage payload rules', () => {
       parseLoaderMessage({ v: PROTOCOL_VERSION, type: 'update', payload: { appearance } }),
     ).not.toBeNull();
   });
+
+  it.each(['onboarding', 'dashboard', 'a-newer-surface'])(
+    'carries the preview surface %s, whatever the name',
+    (preview) => {
+      const update = parseLoaderMessage({
+        v: PROTOCOL_VERSION,
+        type: 'update',
+        payload: { appearance: { brand: '#F9C800' }, preview },
+      });
+
+      expect(update?.type === 'update' && update.payload.preview).toBe(preview);
+    },
+  );
 
   it.each(['__proto__', 'toString'])(
     'ignores %s, which is on Object.prototype rather than in the spec',

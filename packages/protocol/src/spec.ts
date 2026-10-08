@@ -165,6 +165,7 @@ export const LOADER_SPEC: SpecOf<LoaderMessage> = {
   update: {
     locale: { accepts: optional(isString) },
     appearance: { accepts: optional(isAppearance) },
+    preview: { accepts: optional(isString) },
   },
   'token-error': {
     reason: { accepts: isAuthErrorType },

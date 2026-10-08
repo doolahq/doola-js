@@ -12,6 +12,7 @@ export {
   type LoadErrorType,
   type LoaderMessage,
   type PresentationMode,
+  type PreviewSurface,
 } from './messages';
 export { AUTH_ERROR_TYPES, LOAD_ERROR_TYPES } from './spec';
 export { parseAppMessage, parseLoaderMessage } from './parse';

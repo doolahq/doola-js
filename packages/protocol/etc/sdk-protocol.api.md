@@ -115,6 +115,7 @@ export type LoaderMessage = {
     payload: {
         locale?: string | undefined;
         appearance?: Appearance | undefined;
+        preview?: string | undefined;
     };
 } | {
     type: 'token-error';
@@ -153,6 +154,9 @@ export function parseLoaderMessage(data: unknown): LoaderMessage | null;
 
 // @public (undocumented)
 export type PresentationMode = 'inline' | 'fullScreen';
+
+// @public
+export type PreviewSurface = 'onboarding' | 'dashboard';
 
 // @public
 export const PROTOCOL_VERSION = 1;

@@ -67,11 +67,11 @@ export type LoadErrorType =
 export type PresentationMode = 'inline' | 'fullScreen';
 
 /**
- * Branding pushed by an internal mounting peer — the partner portal's preview,
- * which mounts the app the way the loader does and sends a fresh `update` for
- * every unsaved draft. The wire format is a flat map; which keys mean anything
- * is owned by the branding backend (docs/protocol.md), and the app applies only
- * the ones it knows.
+ * Branding pushed by the partner portal's preview, which frames the
+ * session-less preview document rather than mounting the app, and sends a fresh
+ * `update` for every unsaved draft. The wire format is a flat map; which keys
+ * mean anything is owned by the branding backend (docs/protocol.md), and the
+ * preview applies only the ones it knows.
  *
  * Values are `unknown` on purpose. `acceptsAll` fails the whole payload when
  * one field fails, so any value type the wire failed to anticipate costs a
@@ -85,6 +85,12 @@ export type PresentationMode = 'inline' | 'fullScreen';
  * which makes an unrecognised value inert rather than fatal.
  */
 export type Appearance = Record<string, unknown>;
+
+/**
+ * The surfaces the portal's branding preview can show, one at a time
+ * (docs/protocol.md, "The preview peer").
+ */
+export type PreviewSurface = 'onboarding' | 'dashboard';
 
 /**
  * Forwarded verbatim to the partner's `onAuthError` / `onLoadError`, so these
@@ -127,7 +133,18 @@ export type LoaderMessage =
   | { type: 'token'; payload: { session: CustomerSession } }
   | {
       type: 'update';
-      payload: { locale?: string | undefined; appearance?: Appearance | undefined };
+      payload: {
+        locale?: string | undefined;
+        appearance?: Appearance | undefined;
+        /**
+         * The surface the portal's branding preview shows, a `PreviewSurface`
+         * by name. Only the preview peer sends it, and absent means
+         * `onboarding`. A string rather than the union for the reason
+         * `Appearance` holds `unknown`: a name this build has not met would
+         * otherwise cost the whole `update`, branding included.
+         */
+        preview?: string | undefined;
+      };
     }
   | {
       type: 'token-error';
