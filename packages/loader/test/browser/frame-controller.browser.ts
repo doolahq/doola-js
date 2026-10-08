@@ -268,6 +268,19 @@ test('a height negotiated inline survives a full-screen round trip', async ({ pa
     .toBe('512px');
 });
 
+test('a height of 0 is ignored, so a frame shown again keeps its height', async ({ page }) => {
+  await mount(page);
+  const frame = await handshake(page);
+
+  await sendFromApp(frame, { v: PROTOCOL_VERSION, type: 'resize', payload: { height: 512 } });
+  await expect.poll(() => frameHeight(page)).toBe('512px');
+
+  await sendFromApp(frame, { v: PROTOCOL_VERSION, type: 'resize', payload: { height: 0 } });
+  await page.waitForTimeout(250);
+
+  expect(await frameHeight(page)).toBe('512px');
+});
+
 test('a frame mounted under the breakpoint returns to the placeholder, not to zero', async ({
   page,
 }) => {
