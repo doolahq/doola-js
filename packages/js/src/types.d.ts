@@ -37,7 +37,8 @@ export interface CustomerSession {
 }
 
 /**
- * Supplied by the partner. Called on mount and again on every renewal,
+ * Supplied by the partner. Called on mount, on every renewal, and each
+ * time the founder presses Try again after a failed session,
  * so it must always fetch a fresh session from the partner's own server
  * — the one place their doola API key lives.
  *
