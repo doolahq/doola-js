@@ -76,6 +76,11 @@ describe('parseLoaderMessage payload rules', () => {
     ['protocol is zero', 'init', { session, protocol: 0 }],
     ['locale is not a string', 'update', { locale: 42 }],
     ['appearance is an array', 'update', { appearance: ['#fff'] }],
+    ['preview is a number', 'update', { appearance: { brand: '#F9C800' }, preview: 1 }],
+    ['preview is a boolean', 'update', { appearance: { brand: '#F9C800' }, preview: true }],
+    ['preview is null', 'update', { appearance: { brand: '#F9C800' }, preview: null }],
+    ['preview is an object', 'update', { appearance: { brand: '#F9C800' }, preview: {} }],
+    ['preview is an array', 'update', { appearance: { brand: '#F9C800' }, preview: ['dashboard'] }],
     ['retryable is missing', 'token-error', { reason: 'mint_failed', message: 'x' }],
     [
       'reason is not a contract case',
@@ -119,8 +124,6 @@ describe('parseLoaderMessage payload rules', () => {
   it.each(['onboarding', 'dashboard', 'a-newer-surface'])(
     'carries the preview surface %s, whatever the name',
     (preview) => {
-      // The preview resolves an unknown name, so one this build has not met
-      // costs the surface, never the branding riding in the same update.
       const update = parseLoaderMessage({
         v: PROTOCOL_VERSION,
         type: 'update',
@@ -128,16 +131,6 @@ describe('parseLoaderMessage payload rules', () => {
       });
 
       expect(update?.type === 'update' && update.payload.preview).toBe(preview);
-    },
-  );
-
-  // Each case wrapped, because `it.each` spreads a row that is an array.
-  it.each([[1], [true], [null], [{}], [['dashboard']]])(
-    'drops the whole update, branding included, when preview is %j',
-    (preview) => {
-      const payload = { appearance: { brand: '#F9C800' }, preview };
-
-      expect(parseLoaderMessage({ v: PROTOCOL_VERSION, type: 'update', payload })).toBeNull();
     },
   );
 

@@ -89,11 +89,6 @@ export type Appearance = Record<string, unknown>;
 /**
  * The surfaces the portal's branding preview can show, one at a time
  * (docs/protocol.md, "The preview peer").
- *
- * Resolved by the receiver, not enforced by the wire: `update` carries the name
- * as a plain string, and the preview shows a name it does not know as
- * `onboarding`, so a portal that learns a surface before the app does still
- * repaints the branding.
  */
 export type PreviewSurface = 'onboarding' | 'dashboard';
 
