@@ -64,7 +64,7 @@ describe('createSessionHandler', () => {
     it.each([
       ['a live publishable key', 'pk_live_s3cr3tv4lu3', /publishable pk_ key/],
       ['a test publishable key', 'pk_test_s3cr3tv4lu3', /publishable pk_ key/],
-      ['not a doola key', 'sk_live_s3cr3tv4lu3', /Expected dk_live_ or dk_test_/],
+      ['not a doola key', 'sk_live_s3cr3tv4lu3', /Expected dk_live_ or dk_test_/], // gitleaks:allow
       ['a dk_ key for no environment', 'dk_prod_s3cr3tv4lu3', /Expected dk_live_ or dk_test_/],
     ])('is refused at construction when %s, without echoing it', (_, apiKey, message) => {
       const create = () => createSessionHandler({ apiKey, getCustomer: () => CUSTOMER });
