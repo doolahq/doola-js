@@ -8,7 +8,7 @@ minimumReleaseAge: 10080
 # Refuse a version with weaker publish evidence (trusted publisher, then
 # provenance, then none) than an earlier release of the same package. A drop
 # like that is the usual trace of a stolen npm token. Only versions under 90
-# days old are checked: that outlasts a monthly Dependabot run plus its 7-day
+# days old are checked: that outlasts a weekly Dependabot run plus its 7-day
 # cooldown, and older backports cut without provenance would fail every resolve.
 trustPolicy: no-downgrade
 trustPolicyIgnoreAfter: 129600
