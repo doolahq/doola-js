@@ -1,7 +1,27 @@
 packages:
   - 'packages/*'
 
+# Hold back any version published less than a week ago, so a compromised
+# release has time to be caught and pulled before it can land here.
+minimumReleaseAge: 10080
+
+# Refuse a version with weaker publish evidence (trusted publisher, then
+# provenance, then none) than an earlier release of the same package. A drop
+# like that is the usual trace of a stolen npm token. Only versions under 90
+# days old are checked: that outlasts a monthly Dependabot run plus its 7-day
+# cooldown, and older backports cut without provenance would fail every resolve.
+trustPolicy: no-downgrade
+trustPolicyIgnoreAfter: 129600
+
+# Git and tarball URLs carry no publish date or provenance, so the two checks
+# above can't see them. Only our own package.json may use them.
+blockExoticSubdeps: true
+
 # esbuild ships its binary as a platform package, so its install script is not
 # needed, and pnpm 10 runs no dependency scripts unless listed here.
 ignoredBuiltDependencies:
   - esbuild
+
+# A dependency that brings an unlisted install script fails the install instead
+# of being skipped with a warning, so it gets a decision rather than a log line.
+strictDepBuilds: true
