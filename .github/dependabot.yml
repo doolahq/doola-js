@@ -27,6 +27,11 @@ updates:
     directory: '/'
     schedule:
       interval: weekly
+    # Matches minimumReleaseAge in pnpm-workspace.yaml, which would otherwise
+    # fail any Dependabot PR that bumps to a version under a week old. Security
+    # updates skip this cooldown but not minimumReleaseAge, so a fix that new
+    # needs a minimumReleaseAgeExclude entry before it can install. One published
+    # without provenance also needs a trustPolicyExclude entry.
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5
