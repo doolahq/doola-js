@@ -100,7 +100,7 @@ const isTaggedError =
  * message must declare its shape; a payload that fails is dropped like an
  * unknown type.
  */
-const PAYLOAD_SHAPE: Record<AppMessage['type'], ShapeCheck> = {
+const SHAPES: Record<AppMessage['type'], ShapeCheck> = {
   ready: (p) => isPositiveInt(p.protocolMax),
   resize: (p) => isFiniteNumber(p.height) && p.height >= 0,
   'scroll-request': (p) => isFiniteNumber(p.top),
@@ -111,6 +111,14 @@ const PAYLOAD_SHAPE: Record<AppMessage['type'], ShapeCheck> = {
   'load-error': isTaggedError(LOAD_ERROR_TYPES),
   'loader-start': () => true,
 };
+
+// A Map, not the literal: `type` is attacker-chosen, and an object lookup
+// reaches every Object.prototype member — `type: 'toString'` parsed as valid
+// and `type: '__proto__'` threw, against the never-throw rule in
+// docs/protocol.md.
+const PAYLOAD_SHAPE = new Map(Object.entries(SHAPES));
+
+export const APP_MESSAGE_TYPES = Object.keys(SHAPES) as readonly AppMessage['type'][];
 
 /**
  * Whether this envelope was refused for its version alone — the one parse
@@ -149,14 +157,7 @@ export function parseAppMessage(data: unknown): AppMessage | null {
   // keys and passed — `token-request` and `loader-start` took an array.
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;
 
-  // Own property, not a bare index: every Object.prototype member resolved to
-  // something truthy here, so `type: 'toString'` parsed as a valid message and
-  // `type: '__proto__'` threw rather than returning null, against the
-  // never-throw rule in docs/protocol.md. `hasOwnProperty.call`, not
-  // `Object.hasOwn`: tsc's lib for target ES2020 does not declare it.
-  if (!Object.prototype.hasOwnProperty.call(PAYLOAD_SHAPE, type)) return null;
-
-  const hasShape = (PAYLOAD_SHAPE as Record<string, ShapeCheck>)[type];
+  const hasShape = PAYLOAD_SHAPE.get(type);
   if (!hasShape?.(payload as Payload)) return null;
 
   return data as AppMessage;
