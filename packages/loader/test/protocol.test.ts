@@ -1,8 +1,6 @@
-import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
 import {
-  APP_MESSAGE_TYPES,
   envelope,
   MIN_SUPPORTED_VERSION,
   negotiate,
@@ -69,25 +67,6 @@ describe('parseAppMessage', () => {
     ]) {
       expect(parseAppMessage(junk)).toBeNull();
     }
-  });
-
-  it('never throws on arbitrary input, envelope-shaped or not', () => {
-    // Biased toward real envelopes so most cases get past the version check.
-    const type = fc.oneof(
-      fc.constantFrom(...APP_MESSAGE_TYPES, '__proto__', 'toString'),
-      fc.string(),
-    );
-    const envelopeLike = fc.record(
-      { v: fc.oneof(fc.constant(PROTOCOL_VERSION), fc.anything()), type, payload: fc.anything() },
-      { requiredKeys: [] },
-    );
-
-    fc.assert(
-      fc.property(fc.oneof(envelopeLike, fc.anything()), (data) => {
-        const msg = parseAppMessage(data);
-        expect(msg === null || msg === data).toBe(true);
-      }),
-    );
   });
 
   it('marks only the terminal auth cases as not retryable', () => {

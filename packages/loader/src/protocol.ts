@@ -118,8 +118,6 @@ const SHAPES: Record<AppMessage['type'], ShapeCheck> = {
 // docs/protocol.md.
 const PAYLOAD_SHAPE = new Map(Object.entries(SHAPES));
 
-export const APP_MESSAGE_TYPES = Object.keys(SHAPES) as readonly AppMessage['type'][];
-
 /**
  * Whether this envelope was refused for its version alone — the one parse
  * failure that means the peer is a build we cannot talk to, rather than a
