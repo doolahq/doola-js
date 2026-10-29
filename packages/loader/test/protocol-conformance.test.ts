@@ -1,7 +1,8 @@
 import { parseAppMessage as packageParse } from '@doola/sdk-protocol';
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import { parseAppMessage as loaderParse } from '../src/protocol';
+import { type AppMessage, parseAppMessage as loaderParse } from '../src/protocol';
 
 /**
  * The loader and `@doola/sdk-protocol` are two implementations of one
@@ -40,6 +41,19 @@ const CORPUS: [string, unknown][] = [
   ['a string', 'ready'],
 ];
 
+// Exhaustive, so a new message type has to join the fuzzed set.
+const TYPES = Object.keys({
+  ready: 0,
+  resize: 0,
+  'scroll-request': 0,
+  'token-request': 0,
+  formed: 0,
+  'checkout-request': 0,
+  'auth-error': 0,
+  'load-error': 0,
+  'loader-start': 0,
+} satisfies Record<AppMessage['type'], 0>);
+
 /** Null, accepted, or threw — the three outcomes a caller can observe. */
 function classify(parse: (data: unknown) => unknown, message: unknown): string {
   try {
@@ -55,5 +69,27 @@ describe('loader and @doola/sdk-protocol', () => {
 
     expect(loader).not.toMatch(/^threw/);
     expect(classify(packageParse, message)).toBe(loader);
+  });
+
+  it('agree on arbitrary input, without throwing', () => {
+    // Biased toward real envelopes so most cases reach the type lookup.
+    const envelopeLike = fc.record({
+      v: fc.oneof(fc.constant(1), fc.anything()),
+      type: fc.oneof(
+        fc.constantFrom(...TYPES, '__proto__', 'toString', 'constructor'),
+        fc.string(),
+      ),
+      payload: fc.oneof(fc.object(), fc.anything()),
+    });
+
+    fc.assert(
+      fc.property(fc.oneof(envelopeLike, fc.anything()), (message) => {
+        const loader = classify(loaderParse, message);
+
+        expect(loader).not.toMatch(/^threw/);
+        expect(classify(packageParse, message)).toBe(loader);
+      }),
+      { numRuns: 1000 },
+    );
   });
 });
