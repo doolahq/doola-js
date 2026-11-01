@@ -64,8 +64,9 @@ the rule: the ceiling stops a peer claiming a version this side cannot read, and
 the floor is how a retired version stops being spoken to rather than being
 half-understood.
 
-`payload`, and every object inside it (`session`, `appearance`), is a plain
-object: its prototype is `Object.prototype` or `null`. `postMessage`
+`payload`, and each object-valued field the tables name (`session`,
+`appearance`), is a plain object: its prototype is `Object.prototype` or `null`.
+What `appearance` holds is not checked (see below). `postMessage`
 structured-clones, so a `Date`, `Map`, `Set`, `RegExp` or `Error` arrives intact
 and passes a `typeof` test, and every optional field of one reads as absent. An
 `update` built from a `Date` would otherwise clear the locale and the branding.
@@ -157,10 +158,10 @@ mount the app: it frames the session-less preview document and sends
 parses `appearance` on `init` and `update`, so a peer that sends it is not
 refused, but ignores it: the saved config is its only source of branding. The
 loader shares the package's message types, which allow `appearance` and
-`preview`, but it never sends either. No
-message type was added for any of this: the
-`branding_preview` message in earlier sketches is `update { appearance }`. The
-shape of `appearance` is owned by the branding backend (PENG-6219).
+`preview`, but it never sends either. No message type was added for any of
+this: the `branding_preview` message in earlier sketches is
+`update { appearance }`. The shape of `appearance` is owned by the branding
+backend (PENG-6219).
 
 ## The preview peer
 

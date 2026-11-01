@@ -1,6 +1,7 @@
 export {
   MIN_SUPPORTED_VERSION,
   PROTOCOL_VERSION,
+  isSupportedVersion,
   negotiate,
   type Appearance,
   type AppMessage,

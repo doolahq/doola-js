@@ -1,11 +1,11 @@
 import type { CustomerSession, DoolaOptions } from '@doola/js';
 import {
+  isSupportedVersion,
   loaderEnvelope,
-  MIN_SUPPORTED_VERSION,
   negotiate,
   parseAppMessage,
-  PROTOCOL_VERSION,
   type LoaderMessage,
+  type PresentationMode,
 } from '@doola/sdk-protocol';
 
 import {
@@ -21,23 +21,17 @@ const FULLSCREEN_FRAME_CSS =
   'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;';
 
 /**
- * Whether this envelope was refused for its version alone — the one parse
- * failure that means the peer is a build we cannot talk to, rather than a
- * message we could not read.
- *
- * Separate from `parseAppMessage` because that returns a bare null for seven
- * different reasons, and only this one is a deploy skew. Telling a partner
- * their frame "spoke a protocol version this loader does not support" when the
- * real fault was a stringified `protocolMax` sends them to the wrong half of
- * the system.
+ * Whether this envelope names a version outside the supported window — the one
+ * parse failure that means the peer is a build we cannot talk to, rather than
+ * a message we could not read. Telling a partner their frame "spoke a protocol
+ * version this loader does not support" when the real fault was a stringified
+ * `protocolMax` sends them to the wrong half of the system.
  */
 function isUnsupportedVersion(data: unknown): boolean {
   if (typeof data !== 'object' || data === null) return false;
 
   const { v } = data as { v?: unknown };
-  if (typeof v !== 'number' || !Number.isInteger(v)) return false;
-
-  return v > PROTOCOL_VERSION || v < MIN_SUPPORTED_VERSION;
+  return Number.isInteger(v) && !isSupportedVersion(v);
 }
 
 /** The one custom-element tag; what create() returns and partners mount. */
@@ -339,7 +333,7 @@ export class FrameController {
     });
   }
 
-  private get presentationMode(): 'inline' | 'fullScreen' {
+  private get presentationMode(): PresentationMode {
     return this.restoreStyles ? 'fullScreen' : 'inline';
   }
 
@@ -351,8 +345,8 @@ export class FrameController {
 
     const message = parseAppMessage(event.data);
     if (!message) {
-      // Only a version reject is remembered. The other six ways a parse fails
-      // — a malformed payload, an unknown type — mean the frame is alive and
+      // Only a version reject is remembered. The other ways a parse fails — a
+      // malformed payload, an unknown type — mean the frame is alive and
       // said something we could not read, which is "never started", not skew.
       this.versionRefused ||= isUnsupportedVersion(event.data);
       return;

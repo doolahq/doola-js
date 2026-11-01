@@ -1,4 +1,5 @@
 import type { Doola, DoolaOptions } from '@doola/js';
+import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION } from '@doola/sdk-protocol';
 import { expect, test, type Frame, type Page, type Route } from '@playwright/test';
 
 import {
@@ -6,7 +7,6 @@ import {
   PLACEHOLDER_FRAME_HEIGHT_PX,
   READY_AFTER_LOAD_MS,
 } from '../../src/policy';
-import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION } from '@doola/sdk-protocol';
 import { APP_PAGE, navigatedFrame, startHarness, type Harness } from './harness';
 
 let harness: Harness;

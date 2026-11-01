@@ -37,6 +37,20 @@ export function negotiate(theirMax: number): number {
   return Math.min(PROTOCOL_VERSION, theirMax);
 }
 
+/**
+ * Whether `v` names a version inside the supported window. An integer, not
+ * just a number: NaN is a number and every comparison with it is false, so a
+ * bare range check lets it through both bounds. Infinities and fractions name
+ * no version either.
+ */
+export function isSupportedVersion(v: unknown): boolean {
+  return (
+    Number.isInteger(v) &&
+    (v as number) >= MIN_SUPPORTED_VERSION &&
+    (v as number) <= PROTOCOL_VERSION
+  );
+}
+
 /** Minted by the partner's server, carried in memory, never stored. */
 export interface CustomerSession {
   accessToken: string;

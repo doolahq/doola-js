@@ -89,6 +89,9 @@ export interface Envelope<M extends {
     v: number;
 }
 
+// @public
+export function isSupportedVersion(v: unknown): boolean;
+
 // @public (undocumented)
 export const LOAD_ERROR_TYPES: readonly LoadErrorType[];
 

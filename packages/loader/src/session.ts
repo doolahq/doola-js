@@ -119,9 +119,11 @@ export function tokenError(
  * projected — `fetchAccessToken` is the other untrusted boundary, and this is
  * to it what `parseAppMessage` is to the bus.
  *
- * Mirrors the app's session check field for field, deliberately: anything this
- * accepts and forwards but the app rejects would drop the whole `init` there,
- * leaving the frame connecting forever with nothing reported on either side.
+ * Accepts exactly what the wire's session rule (`SESSION_FIELDS` in
+ * `@doola/sdk-protocol`) accepts, and a test holds it there: anything this
+ * forwards but the app rejects would drop the whole `init` there, leaving the
+ * frame connecting forever with nothing reported on either side. It stays
+ * separate because it tells the partner which field was wrong.
  *
  * `expiresIn` is the load-bearing one. It feeds every deadline, and a
  * non-numeric value — `expires_in` through a snake_case serializer is the
@@ -129,9 +131,9 @@ export function tokenError(
  * instead of applying the floor: `setTimeout(NaN)` then reschedules on the
  * next tick, a request storm against the partner's own token route.
  *
- * Projected rather than passed through so keys the partner's route happens to
- * return — anything alongside the three documented ones — do not cross into
- * the frame. The app projects in the other direction for the same reason.
+ * Projected too, so the manager never holds keys the partner's route happens to
+ * return alongside the three documented ones. What crosses into the frame is
+ * `loaderEnvelope`'s projection.
  */
 function parseSession(value: unknown): CustomerSession {
   const reject = (why: string): never => {

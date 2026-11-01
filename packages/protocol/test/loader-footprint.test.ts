@@ -16,8 +16,8 @@ import { describe, expect, it } from 'vitest';
  * none of the app-side half may follow it in.
  */
 const LOADER_IMPORTS = `
-  import { parseAppMessage, loaderEnvelope, negotiate } from '../src/index';
-  globalThis.x = [parseAppMessage, loaderEnvelope, negotiate];
+  import { parseAppMessage, loaderEnvelope, negotiate, isSupportedVersion } from '../src/index';
+  globalThis.x = [parseAppMessage, loaderEnvelope, negotiate, isSupportedVersion];
 `;
 
 async function bundle(contents: string, minify: boolean): Promise<string> {

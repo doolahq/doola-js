@@ -1,3 +1,4 @@
+import { parseLoaderMessage, PROTOCOL_VERSION } from '@doola/sdk-protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionManager, tokenError } from '../src/session';
@@ -261,8 +262,8 @@ describe('SessionManager', () => {
 
 describe('parseSession', () => {
   it('rejects a session the app would reject, before it reaches the frame', async () => {
-    // The app's isSession requires a non-empty accessToken; a session that
-    // fails there drops the whole init and the frame connects forever.
+    // The wire requires a non-empty accessToken; a session that fails there
+    // drops the whole init and the frame connects forever.
     const fetch = vi.fn().mockResolvedValue({ token: 'cs_test_token', expiresIn: 600 });
     const onAuthError = vi.fn();
     const manager = new SessionManager(fetch, onAuthError, vi.fn());
@@ -302,6 +303,44 @@ describe('parseSession', () => {
     );
 
     expect(Object.keys(await manager.current())).toEqual(['accessToken', 'expiresIn']);
+  });
+});
+
+describe('parseSession and the wire', () => {
+  const valid = { accessToken: 'cs_test_token', expiresIn: 600 };
+
+  // The app drops an init whose session the wire refuses, and the frame then
+  // connects forever, so the loader accepts exactly what the wire does.
+  it.each([
+    ['a session', valid],
+    ['a session with expiresAt', { ...valid, expiresAt: '2026-11-01T00:00:00Z' }],
+    ['a session with extra keys', { ...valid, refreshToken: 'r' }],
+    ['an empty accessToken', { ...valid, accessToken: '' }],
+    ['no accessToken', { expiresIn: 600 }],
+    ['a numeric accessToken', { ...valid, accessToken: 42 }],
+    ['a zero expiresIn', { ...valid, expiresIn: 0 }],
+    ['a negative expiresIn', { ...valid, expiresIn: -1 }],
+    ['a NaN expiresIn', { ...valid, expiresIn: Number.NaN }],
+    ['an infinite expiresIn', { ...valid, expiresIn: Number.POSITIVE_INFINITY }],
+    ['a string expiresIn', { ...valid, expiresIn: '600' }],
+    ['no expiresIn', { accessToken: 'cs_test_token' }],
+    ['a numeric expiresAt', { ...valid, expiresAt: 5 }],
+    ['a null expiresAt', { ...valid, expiresAt: null }],
+    ['null', null],
+    ['a string', 'cs_test_token'],
+    ['an array', []],
+    ['a Date', new Date()],
+  ])('agree on %s', async (_label, value) => {
+    const manager = new SessionManager(vi.fn().mockResolvedValue(value), vi.fn(), vi.fn());
+    const loaderAccepts = await manager.current().then(
+      () => true,
+      () => false,
+    );
+    const session = structuredClone(value);
+    const wireAccepts =
+      parseLoaderMessage({ v: PROTOCOL_VERSION, type: 'token', payload: { session } }) !== null;
+
+    expect(loaderAccepts).toBe(wireAccepts);
   });
 });
 

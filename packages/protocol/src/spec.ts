@@ -90,15 +90,7 @@ const isLoadErrorType = oneOf(LOAD_ERROR_TYPES);
 const PRESENTATION_MODE: Record<PresentationMode, true> = { inline: true, fullScreen: true };
 const isPresentationMode = oneOf(Object.keys(PRESENTATION_MODE));
 
-/**
- * What every payload, session and appearance has to be.
- *
- * The prototype is the check, not `!Array.isArray`. `postMessage`
- * structured-clones, so a `Date`, `Map`, `Set`, `RegExp` or `Error` arrives
- * intact and passes a `typeof` test, and every optional field of one reads as
- * absent: an `update` built from a `Date` would clear the locale and the
- * branding wholesale.
- */
+/** A prototype of `Object.prototype` or `null`: docs/protocol.md, Envelope, says why. */
 const isPlainObject = (x: unknown): boolean => {
   if (typeof x !== 'object' || x === null) return false;
 
@@ -110,7 +102,7 @@ const isPlainObject = (x: unknown): boolean => {
 // fails the whole payload when one field fails, so every value type this does
 // not anticipate costs a partner the entire message rather than the one key,
 // and the wire does not own that table: see Appearance.
-const isAppearance = isPlainObject;
+const appearance: Field = { accepts: optional(isPlainObject) };
 
 /**
  * Structure only — a token and a lifetime that is a number. Whether a session
@@ -123,8 +115,8 @@ const isAppearance = isPlainObject;
  */
 const SESSION_FIELDS: FieldsOf<CustomerSession> = {
   accessToken: { accepts: isNonEmptyString },
-  // Positive, matching the loader's parseSession and the app's isSession. A
-  // zero or negative lifetime is not a session either side can act on, and the
+  // Positive, matching the loader's parseSession, which a loader test holds to
+  // this table. A zero or negative lifetime is not a session either side can act on, and the
   // loader's renewal arithmetic turns one into a timer that reschedules on
   // every tick — so the wire refuses it rather than leaving each peer to.
   expiresIn: { accepts: isPositiveNumber },
@@ -135,9 +127,8 @@ const SESSION_FIELDS: FieldsOf<CustomerSession> = {
 export const acceptsAll =
   (fields: Record<string, Field>) =>
   (value: unknown): boolean => {
-    // `every` over an empty field table is vacuously true, and every optional
-    // field of a `Date` or an array reads as absent — so without this, every
-    // message whose payload is `{}` or entirely optional accepts either.
+    // `every` over an empty field table is vacuously true, so this is the only
+    // check a payload with no required field meets.
     if (!isPlainObject(value)) return false;
 
     const values = value as Payload;
@@ -169,7 +160,7 @@ export const LOADER_SPEC: SpecOf<LoaderMessage> = {
     session,
     protocol: { accepts: isPositiveInt },
     locale: { accepts: optional(isString) },
-    appearance: { accepts: optional(isAppearance) },
+    appearance,
     // Optional on the wire even though the loader always sends it: the two
     // sides are cached and deployed independently, so a loader older than this
     // field keeps sending `init` without it. Why it rides on `init` at all is
@@ -179,7 +170,7 @@ export const LOADER_SPEC: SpecOf<LoaderMessage> = {
   token: { session },
   update: {
     locale: { accepts: optional(isString) },
-    appearance: { accepts: optional(isAppearance) },
+    appearance,
     preview: { accepts: optional(isString) },
   },
   'token-error': {

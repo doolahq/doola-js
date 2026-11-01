@@ -23,15 +23,16 @@ const DIRECTIONS = [
   },
 ] as const;
 
-const PROTOTYPE_KEYS = [
-  '__proto__',
-  'constructor',
-  'toString',
-  'valueOf',
-  'hasOwnProperty',
-  'isPrototypeOf',
-  'propertyIsEnumerable',
-  'toLocaleString',
+const PROTOTYPE_KEYS = Object.getOwnPropertyNames(Object.prototype);
+
+// Each passes a `typeof` check, and every optional field of one reads as absent.
+const NOT_PLAIN: [string, unknown][] = [
+  ['an array', []],
+  ['a Date', new Date()],
+  ['a Map', new Map()],
+  ['a Set', new Set()],
+  ['a RegExp', /re/],
+  ['an Error', new Error('boom')],
 ];
 
 describe.each(DIRECTIONS)('$name', ({ parse, messages, optionalOnly }) => {
@@ -71,14 +72,7 @@ describe.each(DIRECTIONS)('$name', ({ parse, messages, optionalOnly }) => {
     expect(parse({ v: PROTOCOL_VERSION, type, payload: {} })).toBeNull();
   });
 
-  it.each([
-    ['an array', []],
-    ['a Date', new Date()],
-    ['a Map', new Map()],
-    ['a Set', new Set()],
-    ['a RegExp', /re/],
-    ['an Error', new Error('boom')],
-  ])('refuses %s in place of a payload', (_label, payload) => {
+  it.each(NOT_PLAIN)('refuses %s in place of a payload', (_label, payload) => {
     expect(parse({ v: PROTOCOL_VERSION, type: optionalOnly, payload })).toBeNull();
   });
 
@@ -99,7 +93,7 @@ describe.each(DIRECTIONS)('$name', ({ parse, messages, optionalOnly }) => {
 
     fc.assert(
       fc.property(fc.oneof(envelopeLike, fc.anything()), (message) => {
-        expect(() => parse(message)).not.toThrow();
+        parse(message);
       }),
       { numRuns: 1000 },
     );
@@ -137,7 +131,6 @@ describe('parseLoaderMessage payload rules', () => {
     ],
     ['protocol is zero', 'init', { session, protocol: 0 }],
     ['locale is not a string', 'update', { locale: 42 }],
-    ['appearance is an array', 'update', { appearance: ['#fff'] }],
     ['preview is a number', 'update', { appearance: { brand: '#F9C800' }, preview: 1 }],
     ['preview is a boolean', 'update', { appearance: { brand: '#F9C800' }, preview: true }],
     ['preview is null', 'update', { appearance: { brand: '#F9C800' }, preview: null }],
@@ -150,7 +143,6 @@ describe('parseLoaderMessage payload rules', () => {
       { reason: 'vibes', message: 'x', retryable: true },
     ],
     ['mode is not a resolved mode', 'presentation', { mode: 'auto' }],
-    ['the payload is an array', 'update', []],
     [
       'init presentation is not a resolved mode',
       'init',
@@ -162,8 +154,6 @@ describe('parseLoaderMessage payload rules', () => {
     ['init locale is not a string', 'init', { session, protocol: 1, locale: 42 }],
     ['init appearance is not a map', 'init', { session, protocol: 1, appearance: 'blue' }],
     ['appearance is null', 'update', { appearance: null }],
-    ['appearance is a Date', 'update', { appearance: new Date() }],
-    ['appearance is a Map', 'update', { appearance: new Map([['brand', '#F9C800']]) }],
     [
       'token-error message is not a string',
       'token-error',
@@ -171,6 +161,12 @@ describe('parseLoaderMessage payload rules', () => {
     ],
   ])('drops when %s', (_why, type, payload) => {
     expect(parseLoaderMessage({ v: PROTOCOL_VERSION, type, payload })).toBeNull();
+  });
+
+  it.each(NOT_PLAIN)('drops %s as an appearance', (_label, appearance) => {
+    expect(
+      parseLoaderMessage({ v: PROTOCOL_VERSION, type: 'update', payload: { appearance } }),
+    ).toBeNull();
   });
 
   it.each(PROTOTYPE_KEYS)('drops %s as a token-error reason', (reason) => {
