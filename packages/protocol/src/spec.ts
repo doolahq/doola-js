@@ -90,12 +90,27 @@ const isLoadErrorType = oneOf(LOAD_ERROR_TYPES);
 const PRESENTATION_MODE: Record<PresentationMode, true> = { inline: true, fullScreen: true };
 const isPresentationMode = oneOf(Object.keys(PRESENTATION_MODE));
 
+/**
+ * What every payload, session and appearance has to be.
+ *
+ * The prototype is the check, not `!Array.isArray`. `postMessage`
+ * structured-clones, so a `Date`, `Map`, `Set`, `RegExp` or `Error` arrives
+ * intact and passes a `typeof` test, and every optional field of one reads as
+ * absent: an `update` built from a `Date` would clear the locale and the
+ * branding wholesale.
+ */
+const isPlainObject = (x: unknown): boolean => {
+  if (typeof x !== 'object' || x === null) return false;
+
+  const proto: unknown = Object.getPrototypeOf(x);
+  return proto === Object.prototype || proto === null;
+};
+
 // Structure only, and structure means "a map" — not what is in it. `acceptsAll`
 // fails the whole payload when one field fails, so every value type this does
 // not anticipate costs a partner the entire message rather than the one key,
 // and the wire does not own that table: see Appearance.
-const isAppearance = (x: unknown): boolean =>
-  typeof x === 'object' && x !== null && !Array.isArray(x);
+const isAppearance = isPlainObject;
 
 /**
  * Structure only — a token and a lifetime that is a number. Whether a session
@@ -120,10 +135,10 @@ const SESSION_FIELDS: FieldsOf<CustomerSession> = {
 export const acceptsAll =
   (fields: Record<string, Field>) =>
   (value: unknown): boolean => {
-    // Arrays are objects, and `every` over an empty field table is vacuously
-    // true — so without this, every message whose payload is `{}` or entirely
-    // optional accepts `payload: []`.
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    // `every` over an empty field table is vacuously true, and every optional
+    // field of a `Date` or an array reads as absent — so without this, every
+    // message whose payload is `{}` or entirely optional accepts either.
+    if (!isPlainObject(value)) return false;
 
     const values = value as Payload;
     return Object.keys(fields).every((name) => fields[name]?.accepts(values[name]));

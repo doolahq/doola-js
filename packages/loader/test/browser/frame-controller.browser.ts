@@ -6,7 +6,7 @@ import {
   PLACEHOLDER_FRAME_HEIGHT_PX,
   READY_AFTER_LOAD_MS,
 } from '../../src/policy';
-import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION } from '../../src/protocol';
+import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION } from '@doola/sdk-protocol';
 import { APP_PAGE, navigatedFrame, startHarness, type Harness } from './harness';
 
 let harness: Harness;

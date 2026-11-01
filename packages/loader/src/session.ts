@@ -1,6 +1,5 @@
 import type { CustomerSession, DoolaAuthError, FetchAccessToken } from '@doola/js';
-
-import { parseSession } from './protocol';
+import type { LoaderMessage } from '@doola/sdk-protocol';
 
 /**
  * Renew at this fraction of the token's lifetime. Loader policy,
@@ -83,6 +82,80 @@ function rejection(error: unknown): { status?: unknown; code?: string } {
   const { status, code } = error as { status?: unknown; code?: unknown };
 
   return typeof code === 'string' && DOOLA_CODE.test(code) ? { status, code } : { status };
+}
+
+/**
+ * Whether the failure is not final: a `token-request` (before `init`, a
+ * `ready`) or a new mount fetches again (the loader schedules no retry of its
+ * own).
+ * Exhaustive over the contract's union so a new case is a compile error
+ * here rather than a silent "retryable".
+ */
+const RETRYABLE: Record<DoolaAuthError['type'], boolean> = {
+  partner_session_expired: false,
+  email_in_use: false,
+  external_id_conflict: false,
+  customer_revoked: false,
+  mint_failed: true,
+  renewal_failed: true,
+};
+
+/**
+ * `retryable` follows what the partner is told, and `reason` what the frame
+ * shows, so a terminal failure shown with neutral copy stays terminal.
+ */
+export function tokenError(
+  error: DoolaAuthError,
+  shown: DoolaAuthError['type'],
+): Extract<LoaderMessage, { type: 'token-error' }> {
+  return {
+    type: 'token-error',
+    payload: { reason: shown, message: error.message, retryable: RETRYABLE[error.type] },
+  };
+}
+
+/**
+ * The session the partner's `fetchAccessToken` resolved with, checked and
+ * projected — `fetchAccessToken` is the other untrusted boundary, and this is
+ * to it what `parseAppMessage` is to the bus.
+ *
+ * Mirrors the app's session check field for field, deliberately: anything this
+ * accepts and forwards but the app rejects would drop the whole `init` there,
+ * leaving the frame connecting forever with nothing reported on either side.
+ *
+ * `expiresIn` is the load-bearing one. It feeds every deadline, and a
+ * non-numeric value — `expires_in` through a snake_case serializer is the
+ * likely way in — makes the renewal delay NaN, which `Math.max` propagates
+ * instead of applying the floor: `setTimeout(NaN)` then reschedules on the
+ * next tick, a request storm against the partner's own token route.
+ *
+ * Projected rather than passed through so keys the partner's route happens to
+ * return — anything alongside the three documented ones — do not cross into
+ * the frame. The app projects in the other direction for the same reason.
+ */
+function parseSession(value: unknown): CustomerSession {
+  const reject = (why: string): never => {
+    throw new Error(`doola: fetchAccessToken ${why}.`);
+  };
+
+  if (typeof value !== 'object' || value === null) reject('must resolve with a session object');
+
+  const { accessToken, expiresIn, expiresAt } = value as Record<string, unknown>;
+
+  if (typeof accessToken !== 'string' || accessToken === '')
+    reject('resolved without an accessToken string');
+  if (!Number.isFinite(expiresIn) || (expiresIn as number) <= 0)
+    reject(
+      `resolved with expiresIn ${JSON.stringify(expiresIn)}; expected a positive number of seconds`,
+    );
+  if (expiresAt !== undefined && typeof expiresAt !== 'string')
+    reject(`resolved with a non-string expiresAt ${JSON.stringify(expiresAt)}`);
+
+  return {
+    accessToken: accessToken as string,
+    expiresIn: expiresIn as number,
+    ...(expiresAt === undefined ? {} : { expiresAt: expiresAt as string }),
+  };
 }
 
 /**

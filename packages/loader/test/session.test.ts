@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SessionManager } from '../src/session';
+import { SessionManager, tokenError } from '../src/session';
 
 const session = (expiresIn: number) => ({
   accessToken: 'cs_test_token',
@@ -302,5 +302,27 @@ describe('parseSession', () => {
     );
 
     expect(Object.keys(await manager.current())).toEqual(['accessToken', 'expiresIn']);
+  });
+});
+
+describe('tokenError', () => {
+  it('marks only the terminal auth cases as not retryable', () => {
+    const retryable = (type: Parameters<typeof tokenError>[0]['type']) =>
+      tokenError({ type, message: '' }, type).payload.retryable;
+
+    expect(retryable('partner_session_expired')).toBe(false);
+    expect(retryable('email_in_use')).toBe(false);
+    expect(retryable('external_id_conflict')).toBe(false);
+    expect(retryable('customer_revoked')).toBe(false);
+    expect(retryable('mint_failed')).toBe(true);
+    expect(retryable('renewal_failed')).toBe(true);
+  });
+
+  it('shows the reason it is given, and keeps the retryability of the partner type', () => {
+    expect(tokenError({ type: 'email_in_use', message: 'm' }, 'mint_failed').payload).toEqual({
+      reason: 'mint_failed',
+      message: 'm',
+      retryable: false,
+    });
   });
 });
