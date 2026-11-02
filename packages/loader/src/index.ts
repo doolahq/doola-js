@@ -1,4 +1,5 @@
 import type { Doola, DoolaComponent, DoolaOptions } from '@doola/js';
+import type { LoaderMessage } from '@doola/sdk-protocol';
 
 import {
   defineElementOnce,
@@ -10,8 +11,7 @@ import {
 } from './component';
 import { envFromPublishableKey } from './env';
 import { presentationModeFrom, serializedOrigin } from './options';
-import { tokenError, type LoaderMessage } from './protocol';
-import { SessionManager } from './session';
+import { SessionManager, tokenError } from './session';
 
 /** `auto` promotes to full screen below this width. Loader policy — see `Presentation` in the contract. */
 const FULLSCREEN_BREAKPOINT_PX = 640;

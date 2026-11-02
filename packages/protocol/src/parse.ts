@@ -1,4 +1,4 @@
-import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION } from './messages';
+import { isSupportedVersion } from './messages';
 import type { AppMessage, LoaderMessage } from './messages';
 import { APP_SPEC, LOADER_SPEC, acceptsAll, type Spec } from './spec';
 
@@ -6,13 +6,8 @@ function parse<T>(data: unknown, spec: Spec): T | null {
   if (typeof data !== 'object' || data === null) return null;
 
   const { v, type, payload } = data as { v?: unknown; type?: unknown; payload?: unknown };
-  // Integer, not just number: NaN is a number and every comparison with it is
-  // false, so a bare range check lets `v: NaN` through both bounds. This also
-  // rejects infinities and fractional versions, none of which name a version.
-  if (typeof v !== 'number' || !Number.isInteger(v)) return null;
-  if (v > PROTOCOL_VERSION || v < MIN_SUPPORTED_VERSION) return null;
+  if (!isSupportedVersion(v)) return null;
   if (typeof type !== 'string') return null;
-  if (typeof payload !== 'object' || payload === null) return null;
 
   // Own property, not a bare index: `spec['toString']` is a truthy
   // Object.prototype member and `acceptsAll` over no fields passes vacuously.
@@ -28,9 +23,9 @@ function parse<T>(data: unknown, spec: Spec): T | null {
  * For the mounting peer: a message the app sent, or `null`.
  *
  * Null covers every way a message can be unusable — unknown type, malformed
- * payload, a version outside the supported window — because there is nothing
- * useful either side can do differently between those cases, and throwing
- * would turn a stray `postMessage` from any script on the page into a crash.
+ * payload, a version outside the supported window — and throwing would turn a
+ * stray `postMessage` from any script on the page into a crash. A caller that
+ * has to tell a deploy skew from the rest checks `v` with `isSupportedVersion`.
  */
 export function parseAppMessage(data: unknown): AppMessage | null {
   return parse<AppMessage>(data, APP_SPEC);

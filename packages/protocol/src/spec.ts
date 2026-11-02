@@ -90,28 +90,35 @@ const isLoadErrorType = oneOf(LOAD_ERROR_TYPES);
 const PRESENTATION_MODE: Record<PresentationMode, true> = { inline: true, fullScreen: true };
 const isPresentationMode = oneOf(Object.keys(PRESENTATION_MODE));
 
+/** A prototype of `Object.prototype` or `null`: docs/protocol.md, Envelope, says why. */
+const isPlainObject = (x: unknown): boolean => {
+  if (typeof x !== 'object' || x === null) return false;
+
+  const proto: unknown = Object.getPrototypeOf(x);
+  return proto === Object.prototype || proto === null;
+};
+
 // Structure only, and structure means "a map" — not what is in it. `acceptsAll`
 // fails the whole payload when one field fails, so every value type this does
 // not anticipate costs a partner the entire message rather than the one key,
 // and the wire does not own that table: see Appearance.
-const isAppearance = (x: unknown): boolean =>
-  typeof x === 'object' && x !== null && !Array.isArray(x);
+const appearance: Field = { accepts: optional(isPlainObject) };
 
 /**
- * Structure only — a token and a lifetime that is a number. Whether a session
- * is worth acting on is the loader's call: it owns renewal scheduling and can
- * tell the user, where dropping the message here would leave the frame waiting
- * for a token that already arrived.
+ * Structure, plus one value rule: the lifetime must be positive (below).
+ * Anything else about whether a session is worth acting on is the loader's
+ * call: it owns renewal scheduling and can tell the user, where dropping the
+ * message here would leave the frame waiting for a token that already arrived.
  *
  * The session also reaches the frame as whatever the partner's route returned,
  * so it is projected like any payload: these three fields and nothing else.
  */
 const SESSION_FIELDS: FieldsOf<CustomerSession> = {
   accessToken: { accepts: isNonEmptyString },
-  // Positive, matching the loader's parseSession and the app's isSession. A
-  // zero or negative lifetime is not a session either side can act on, and the
-  // loader's renewal arithmetic turns one into a timer that reschedules on
-  // every tick — so the wire refuses it rather than leaving each peer to.
+  // Positive: a zero or negative lifetime is not a session either side can act
+  // on, and the loader's renewal arithmetic turns one into a timer that
+  // reschedules on every tick, so the wire refuses it rather than leaving each
+  // peer to.
   expiresIn: { accepts: isPositiveNumber },
   expiresAt: { accepts: optional(isString) },
 };
@@ -120,10 +127,9 @@ const SESSION_FIELDS: FieldsOf<CustomerSession> = {
 export const acceptsAll =
   (fields: Record<string, Field>) =>
   (value: unknown): boolean => {
-    // Arrays are objects, and `every` over an empty field table is vacuously
-    // true — so without this, every message whose payload is `{}` or entirely
-    // optional accepts `payload: []`.
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    // `every` over an empty field table is vacuously true, so this is the only
+    // check a payload with no required field meets.
+    if (!isPlainObject(value)) return false;
 
     const values = value as Payload;
     return Object.keys(fields).every((name) => fields[name]?.accepts(values[name]));
@@ -154,7 +160,7 @@ export const LOADER_SPEC: SpecOf<LoaderMessage> = {
     session,
     protocol: { accepts: isPositiveInt },
     locale: { accepts: optional(isString) },
-    appearance: { accepts: optional(isAppearance) },
+    appearance,
     // Optional on the wire even though the loader always sends it: the two
     // sides are cached and deployed independently, so a loader older than this
     // field keeps sending `init` without it. Why it rides on `init` at all is
@@ -164,7 +170,7 @@ export const LOADER_SPEC: SpecOf<LoaderMessage> = {
   token: { session },
   update: {
     locale: { accepts: optional(isString) },
-    appearance: { accepts: optional(isAppearance) },
+    appearance,
     preview: { accepts: optional(isString) },
   },
   'token-error': {

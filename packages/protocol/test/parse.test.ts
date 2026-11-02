@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
 import { MIN_SUPPORTED_VERSION, PROTOCOL_VERSION, negotiate } from '../src/messages';
@@ -5,12 +6,36 @@ import { parseAppMessage, parseLoaderMessage } from '../src/parse';
 
 import { APP_MESSAGES, LOADER_MESSAGES, session } from './fixtures';
 
+// `optionalOnly` names a message whose payload has no required field, which is
+// where a payload that is the wrong kind of object has nothing else to fail on.
 const DIRECTIONS = [
-  { name: 'app -> peer', parse: parseAppMessage, messages: APP_MESSAGES },
-  { name: 'peer -> app', parse: parseLoaderMessage, messages: LOADER_MESSAGES },
+  {
+    name: 'app -> peer',
+    parse: parseAppMessage,
+    messages: APP_MESSAGES,
+    optionalOnly: 'token-request',
+  },
+  {
+    name: 'peer -> app',
+    parse: parseLoaderMessage,
+    messages: LOADER_MESSAGES,
+    optionalOnly: 'update',
+  },
 ] as const;
 
-describe.each(DIRECTIONS)('$name', ({ parse, messages }) => {
+const PROTOTYPE_KEYS = Object.getOwnPropertyNames(Object.prototype);
+
+// Each passes a `typeof` check, and every optional field of one reads as absent.
+const NOT_PLAIN: [string, unknown][] = [
+  ['an array', []],
+  ['a Date', new Date()],
+  ['a Map', new Map()],
+  ['a Set', new Set()],
+  ['a RegExp', /re/],
+  ['an Error', new Error('boom')],
+];
+
+describe.each(DIRECTIONS)('$name', ({ parse, messages, optionalOnly }) => {
   it.each(Object.values(messages).map((m) => [m.type, m] as const))(
     'accepts a well-formed %s',
     (_type, message) => {
@@ -41,6 +66,37 @@ describe.each(DIRECTIONS)('$name', ({ parse, messages }) => {
 
   it('ignores a type the other side invented', () => {
     expect(parse({ v: PROTOCOL_VERSION, type: 'teleport', payload: {} })).toBeNull();
+  });
+
+  it.each(PROTOTYPE_KEYS)('ignores %s as a type, without throwing', (type) => {
+    expect(parse({ v: PROTOCOL_VERSION, type, payload: {} })).toBeNull();
+  });
+
+  it.each(NOT_PLAIN)('refuses %s in place of a payload', (_label, payload) => {
+    expect(parse({ v: PROTOCOL_VERSION, type: optionalOnly, payload })).toBeNull();
+  });
+
+  it('accepts the plain empty payload those impersonate, with or without a prototype', () => {
+    expect(parse({ v: PROTOCOL_VERSION, type: optionalOnly, payload: {} })).not.toBeNull();
+    expect(
+      parse({ v: PROTOCOL_VERSION, type: optionalOnly, payload: Object.create(null) as object }),
+    ).not.toBeNull();
+  });
+
+  it('never throws on arbitrary input', () => {
+    // Biased toward real envelopes so most cases reach the type lookup.
+    const envelopeLike = fc.record({
+      v: fc.oneof(fc.constant(PROTOCOL_VERSION), fc.anything()),
+      type: fc.oneof(fc.constantFrom(...Object.keys(messages), ...PROTOTYPE_KEYS), fc.string()),
+      payload: fc.oneof(fc.object(), fc.anything()),
+    });
+
+    fc.assert(
+      fc.property(fc.oneof(envelopeLike, fc.anything()), (message) => {
+        parse(message);
+      }),
+      { numRuns: 1000 },
+    );
   });
 });
 
@@ -75,7 +131,6 @@ describe('parseLoaderMessage payload rules', () => {
     ],
     ['protocol is zero', 'init', { session, protocol: 0 }],
     ['locale is not a string', 'update', { locale: 42 }],
-    ['appearance is an array', 'update', { appearance: ['#fff'] }],
     ['preview is a number', 'update', { appearance: { brand: '#F9C800' }, preview: 1 }],
     ['preview is a boolean', 'update', { appearance: { brand: '#F9C800' }, preview: true }],
     ['preview is null', 'update', { appearance: { brand: '#F9C800' }, preview: null }],
@@ -88,7 +143,6 @@ describe('parseLoaderMessage payload rules', () => {
       { reason: 'vibes', message: 'x', retryable: true },
     ],
     ['mode is not a resolved mode', 'presentation', { mode: 'auto' }],
-    ['the payload is an array', 'update', []],
     [
       'init presentation is not a resolved mode',
       'init',
@@ -99,6 +153,7 @@ describe('parseLoaderMessage payload rules', () => {
     ['expiresIn is zero', 'token', { session: { accessToken: 'cs_x', expiresIn: 0 } }],
     ['init locale is not a string', 'init', { session, protocol: 1, locale: 42 }],
     ['init appearance is not a map', 'init', { session, protocol: 1, appearance: 'blue' }],
+    ['appearance is null', 'update', { appearance: null }],
     [
       'token-error message is not a string',
       'token-error',
@@ -106,6 +161,18 @@ describe('parseLoaderMessage payload rules', () => {
     ],
   ])('drops when %s', (_why, type, payload) => {
     expect(parseLoaderMessage({ v: PROTOCOL_VERSION, type, payload })).toBeNull();
+  });
+
+  it.each(NOT_PLAIN)('drops %s as an appearance', (_label, appearance) => {
+    expect(
+      parseLoaderMessage({ v: PROTOCOL_VERSION, type: 'update', payload: { appearance } }),
+    ).toBeNull();
+  });
+
+  it.each(PROTOTYPE_KEYS)('drops %s as a token-error reason', (reason) => {
+    const payload = { reason, message: 'x', retryable: false };
+
+    expect(parseLoaderMessage({ v: PROTOCOL_VERSION, type: 'token-error', payload })).toBeNull();
   });
 
   it.each([
@@ -131,14 +198,6 @@ describe('parseLoaderMessage payload rules', () => {
       });
 
       expect(update?.type === 'update' && update.payload.preview).toBe(preview);
-    },
-  );
-
-  it.each(['__proto__', 'toString'])(
-    'ignores %s, which is on Object.prototype rather than in the spec',
-    (type) => {
-      expect(parseAppMessage({ v: PROTOCOL_VERSION, type, payload: {} })).toBeNull();
-      expect(parseLoaderMessage({ v: PROTOCOL_VERSION, type, payload: {} })).toBeNull();
     },
   );
 

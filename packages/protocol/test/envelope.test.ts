@@ -7,18 +7,22 @@ import { parseLoaderMessage } from '../src/parse';
 import { APP_MESSAGES, LOADER_MESSAGES, session } from './fixtures';
 
 describe('projection', () => {
-  it('puts only the company id on the wire, whatever it was handed', () => {
-    const leaky = { companyId: 'c_1', ownerSsn: '000-00-0000', email: 'a@b.co' };
+  // Both land in the partner's `onFormed`, which the contract says gets the id alone.
+  it.each(['formed', 'checkout-request'] as const)(
+    'puts only the company id on the wire for %s, whatever it was handed',
+    (type) => {
+      const leaky = { companyId: 'c_1', ownerSsn: '000-00-0000', email: 'a@b.co' };
 
-    const sent = appEnvelope(
-      // A wider object assigned to a narrower type: legal TypeScript, and
-      // exactly what the projection exists to stop.
-      { type: 'formed', payload: leaky as { companyId: string } },
-      PROTOCOL_VERSION,
-    );
+      const sent = appEnvelope(
+        // A wider object assigned to a narrower type: legal TypeScript, and
+        // exactly what the projection exists to stop.
+        { type, payload: leaky as { companyId: string } },
+        PROTOCOL_VERSION,
+      );
 
-    expect(sent.payload).toStrictEqual({ companyId: 'c_1' });
-  });
+      expect(sent.payload).toStrictEqual({ companyId: 'c_1' });
+    },
+  );
 
   it('forwards only the session fields the contract defines', () => {
     const fromPartnerRoute = { ...session, refreshToken: 'do-not-forward' };

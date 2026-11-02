@@ -25,6 +25,7 @@ import {
   PROTOCOL_VERSION,
   MIN_SUPPORTED_VERSION,
   negotiate,
+  isSupportedVersion,
   parseAppMessage,
   parseLoaderMessage,
   appEnvelope,
@@ -44,6 +45,9 @@ import {
   something copies out the declared fields. `formed` carries a company id and
   nothing else because of this.
 - `negotiate` — `min(mine, theirs)`, the handshake's only downgrade mechanism.
+- `isSupportedVersion` — the version rule both parsers apply. The parsers return
+  a bare `null` for every failure; a caller that has to tell a peer it cannot
+  talk to from a message it could not read checks `v` with this.
 
 The version argument on both envelope functions is required. It is a property
 of the connection, agreed once in the `ready`/`init` handshake, and defaulting

@@ -1,6 +1,7 @@
+import { parseLoaderMessage, PROTOCOL_VERSION } from '@doola/sdk-protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SessionManager } from '../src/session';
+import { SessionManager, tokenError } from '../src/session';
 
 const session = (expiresIn: number) => ({
   accessToken: 'cs_test_token',
@@ -261,8 +262,8 @@ describe('SessionManager', () => {
 
 describe('parseSession', () => {
   it('rejects a session the app would reject, before it reaches the frame', async () => {
-    // The app's isSession requires a non-empty accessToken; a session that
-    // fails there drops the whole init and the frame connects forever.
+    // The wire requires a non-empty accessToken; a session that fails there
+    // drops the whole init and the frame connects forever.
     const fetch = vi.fn().mockResolvedValue({ token: 'cs_test_token', expiresIn: 600 });
     const onAuthError = vi.fn();
     const manager = new SessionManager(fetch, onAuthError, vi.fn());
@@ -302,5 +303,70 @@ describe('parseSession', () => {
     );
 
     expect(Object.keys(await manager.current())).toEqual(['accessToken', 'expiresIn']);
+  });
+});
+
+describe('parseSession and the wire', () => {
+  const valid = { accessToken: 'cs_test_token', expiresIn: 600 };
+
+  // The app drops an init whose session the wire refuses, and the frame then
+  // connects forever. What crosses is the loader's projection, not the
+  // partner's value, so that is what the wire must accept; and a value the
+  // loader refuses must be one the wire would refuse too.
+  it.each([
+    ['a session', valid],
+    ['a session with expiresAt', { ...valid, expiresAt: '2026-11-01T00:00:00Z' }],
+    ['a session with extra keys', { ...valid, refreshToken: 'r' }],
+    ['an empty accessToken', { ...valid, accessToken: '' }],
+    ['no accessToken', { expiresIn: 600 }],
+    ['a numeric accessToken', { ...valid, accessToken: 42 }],
+    ['a zero expiresIn', { ...valid, expiresIn: 0 }],
+    ['a negative expiresIn', { ...valid, expiresIn: -1 }],
+    ['a NaN expiresIn', { ...valid, expiresIn: Number.NaN }],
+    ['an infinite expiresIn', { ...valid, expiresIn: Number.POSITIVE_INFINITY }],
+    ['a string expiresIn', { ...valid, expiresIn: '600' }],
+    ['no expiresIn', { accessToken: 'cs_test_token' }],
+    ['a numeric expiresAt', { ...valid, expiresAt: 5 }],
+    ['a null expiresAt', { ...valid, expiresAt: null }],
+    ['null', null],
+    ['a string', 'cs_test_token'],
+    ['an array', []],
+    ['a Date', new Date()],
+    ['a valid session on a Date', Object.assign(new Date(), valid)],
+    ['a valid session behind prototype getters', Object.create(valid)],
+  ])('agree on %s', async (_label, value) => {
+    const manager = new SessionManager(vi.fn().mockResolvedValue(value), vi.fn(), vi.fn());
+    const sent = await manager.current().catch(() => null);
+    const wireAccepts = (session: unknown) =>
+      parseLoaderMessage({
+        v: PROTOCOL_VERSION,
+        type: 'token',
+        payload: { session: structuredClone(session) },
+      }) !== null;
+
+    if (sent) expect(wireAccepts(sent)).toBe(true);
+    else expect(wireAccepts(value)).toBe(false);
+  });
+});
+
+describe('tokenError', () => {
+  it('marks only the terminal auth cases as not retryable', () => {
+    const retryable = (type: Parameters<typeof tokenError>[0]['type']) =>
+      tokenError({ type, message: '' }, type).payload.retryable;
+
+    expect(retryable('partner_session_expired')).toBe(false);
+    expect(retryable('email_in_use')).toBe(false);
+    expect(retryable('external_id_conflict')).toBe(false);
+    expect(retryable('customer_revoked')).toBe(false);
+    expect(retryable('mint_failed')).toBe(true);
+    expect(retryable('renewal_failed')).toBe(true);
+  });
+
+  it('shows the reason it is given, and keeps the retryability of the partner type', () => {
+    expect(tokenError({ type: 'email_in_use', message: 'm' }, 'mint_failed').payload).toEqual({
+      reason: 'mint_failed',
+      message: 'm',
+      retryable: false,
+    });
   });
 });

@@ -5,12 +5,10 @@ column in the message tables records the version each message was added in.
 
 `@doola/sdk-protocol` (`packages/protocol`) exists so both sides can implement
 it from one place — message types, inbound validators, outbound payload
-projections. **Neither side imports it yet**: the loader still carries its own
-copy in `packages/loader/src/protocol.ts` and the app carries one in
-`doolahq/doola-sdk-app`, so until adoption lands, package behaviour is not
-loader behaviour and this document is the only thing they have in common. It
-remains the specification either way: where an implementation disagrees with
-it, the implementation has the bug.
+projections. The loader imports it from this workspace. The app imports it from
+npm once `doolahq/doola-sdk-app` moves off its own copy; until then the two
+agree only through this document. It remains the specification either way:
+where an implementation disagrees with it, the implementation has the bug.
 
 The contract between the loader (partner's page, doola code) and the embedded app
 (the SDK origin, inside the iframe). Internal to doola — partners never touch this —
@@ -65,6 +63,14 @@ below the oldest version it still supports. Both ends of that window are part of
 the rule: the ceiling stops a peer claiming a version this side cannot read, and
 the floor is how a retired version stops being spoken to rather than being
 half-understood.
+
+`payload`, and each object-valued field the tables name (`session`,
+`appearance`), is a plain object: its prototype is `Object.prototype` or `null`.
+What `appearance` holds is not checked (see below). `postMessage`
+structured-clones, so a `Date`, `Map`, `Set`, `RegExp` or `Error` arrives intact
+and passes a `typeof` test, and every optional field of one reads as absent. An
+`update` built from a `Date` would otherwise clear the locale and the branding.
+Arrays are refused by the same rule.
 
 ## Origin and source checks — both directions, no exceptions
 
@@ -150,10 +156,12 @@ only `locale`. Its consumer is the portal's branding preview, which does not
 mount the app: it frames the session-less preview document and sends
 `update { appearance, preview }` for each unsaved draft (below). The app still
 parses `appearance` on `init` and `update`, so a peer that sends it is not
-refused, but ignores it: the saved config is its only source of branding. No
-message type was added for any of this: the
-`branding_preview` message in earlier sketches is `update { appearance }`. The
-shape of `appearance` is owned by the branding backend (PENG-6219).
+refused, but ignores it: the saved config is its only source of branding. The
+loader shares the package's message types, which allow `appearance` and
+`preview`, but it never sends either. No message type was added for any of
+this: the `branding_preview` message in earlier sketches is
+`update { appearance }`. The shape of `appearance` is owned by the branding
+backend (PENG-6219).
 
 ## The preview peer
 
