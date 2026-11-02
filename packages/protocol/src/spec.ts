@@ -105,20 +105,20 @@ const isPlainObject = (x: unknown): boolean => {
 const appearance: Field = { accepts: optional(isPlainObject) };
 
 /**
- * Structure only — a token and a lifetime that is a number. Whether a session
- * is worth acting on is the loader's call: it owns renewal scheduling and can
- * tell the user, where dropping the message here would leave the frame waiting
- * for a token that already arrived.
+ * Structure, plus one value rule: the lifetime must be positive (below).
+ * Anything else about whether a session is worth acting on is the loader's
+ * call: it owns renewal scheduling and can tell the user, where dropping the
+ * message here would leave the frame waiting for a token that already arrived.
  *
  * The session also reaches the frame as whatever the partner's route returned,
  * so it is projected like any payload: these three fields and nothing else.
  */
 const SESSION_FIELDS: FieldsOf<CustomerSession> = {
   accessToken: { accepts: isNonEmptyString },
-  // Positive, matching the loader's parseSession, which a loader test holds to
-  // this table. A zero or negative lifetime is not a session either side can act on, and the
-  // loader's renewal arithmetic turns one into a timer that reschedules on
-  // every tick — so the wire refuses it rather than leaving each peer to.
+  // Positive: a zero or negative lifetime is not a session either side can act
+  // on, and the loader's renewal arithmetic turns one into a timer that
+  // reschedules on every tick, so the wire refuses it rather than leaving each
+  // peer to.
   expiresIn: { accepts: isPositiveNumber },
   expiresAt: { accepts: optional(isString) },
 };

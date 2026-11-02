@@ -310,7 +310,9 @@ describe('parseSession and the wire', () => {
   const valid = { accessToken: 'cs_test_token', expiresIn: 600 };
 
   // The app drops an init whose session the wire refuses, and the frame then
-  // connects forever, so the loader accepts exactly what the wire does.
+  // connects forever. What crosses is the loader's projection, not the
+  // partner's value, so that is what the wire must accept; and a value the
+  // loader refuses must be one the wire would refuse too.
   it.each([
     ['a session', valid],
     ['a session with expiresAt', { ...valid, expiresAt: '2026-11-01T00:00:00Z' }],
@@ -330,17 +332,20 @@ describe('parseSession and the wire', () => {
     ['a string', 'cs_test_token'],
     ['an array', []],
     ['a Date', new Date()],
+    ['a valid session on a Date', Object.assign(new Date(), valid)],
+    ['a valid session behind prototype getters', Object.create(valid)],
   ])('agree on %s', async (_label, value) => {
     const manager = new SessionManager(vi.fn().mockResolvedValue(value), vi.fn(), vi.fn());
-    const loaderAccepts = await manager.current().then(
-      () => true,
-      () => false,
-    );
-    const session = structuredClone(value);
-    const wireAccepts =
-      parseLoaderMessage({ v: PROTOCOL_VERSION, type: 'token', payload: { session } }) !== null;
+    const sent = await manager.current().catch(() => null);
+    const wireAccepts = (session: unknown) =>
+      parseLoaderMessage({
+        v: PROTOCOL_VERSION,
+        type: 'token',
+        payload: { session: structuredClone(session) },
+      }) !== null;
 
-    expect(loaderAccepts).toBe(wireAccepts);
+    if (sent) expect(wireAccepts(sent)).toBe(true);
+    else expect(wireAccepts(value)).toBe(false);
   });
 });
 
