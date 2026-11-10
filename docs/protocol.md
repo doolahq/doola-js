@@ -283,12 +283,13 @@ living in the partner's page).
        (still `retryable: false`): the email may not be the cause, so the
        founder is not told it is. On renewal it is `renewal_failed`.
      - a `code` not listed → `mint_failed` or `renewal_failed`, as below.
-   - `403` with `code` `E_SCOPE_NOT_ENTITLED` → `mint_failed` or
-     `renewal_failed`, but terminal: the session asked for a scope the
-     partner's tenant does not hold (`sdk:tax` without the tax feature), and
-     every retry mints the same refusal. Its `token-error` carries
-     `retryable: false`, and the loader also calls `onLoadError` with
-     `invalid_request_error`, since the fix is the partner's configuration.
+   - `403` with `code` `E_SCOPE_NOT_ENTITLED` → on the first mint, `mint_failed`
+     but terminal: the session asked for a scope the partner's tenant does not
+     hold (`sdk:tax` without the tax feature), and every retry mints the same
+     refusal. Its `token-error` carries `retryable: false`, and the loader also
+     calls `onLoadError` with `invalid_request_error`, since the fix is the
+     partner's configuration. On renewal it is an ordinary, retryable
+     `renewal_failed`: the current token keeps working until it expires.
      Any other `403` is `mint_failed` or `renewal_failed`, retryable.
    - anything else → `mint_failed` on first mint, `renewal_failed` on renewal.
 
