@@ -1,10 +1,10 @@
-import type { Presentation } from '@doola/js';
+import type { DoolaCreateOptions, Presentation } from '@doola/js';
 
 /**
- * Init-time validation of the two options that previously failed silently.
- * Everything here throws, matching `publishableKey`, `fetchAccessToken`,
- * `onAuthError` and `onFormed`: a mistake in the partner's call should be a
- * sentence in their console, not a frame that quietly does nothing.
+ * Validation of the options that would otherwise fail silently. Everything
+ * here throws, matching `publishableKey`, `fetchAccessToken`, `onAuthError`
+ * and `onFormed`: a mistake in the partner's call should be a sentence in
+ * their console, not a frame that quietly does nothing.
  */
 
 /**
@@ -50,4 +50,30 @@ export function presentationModeFrom(
     );
 
   return mode;
+}
+
+export type Product = NonNullable<DoolaCreateOptions['product']>;
+
+/**
+ * The product, defaulting to formation. Validated here because the app refuses
+ * an unknown value only once the frame has loaded, as a load error a partner
+ * might never connect to the call that caused it.
+ */
+export function productFrom(options: DoolaCreateOptions | undefined): Product {
+  if (
+    options !== undefined &&
+    (typeof options !== 'object' || options === null || Array.isArray(options))
+  )
+    throw new Error(
+      `doola: create() takes an options object, such as { product: 'tax' }, received ${JSON.stringify(options)}.`,
+    );
+
+  const product = options?.product === undefined ? 'formation' : options.product;
+
+  if (product !== 'formation' && product !== 'tax')
+    throw new Error(
+      `doola: product must be 'formation' or 'tax', received ${JSON.stringify(product)}.`,
+    );
+
+  return product;
 }

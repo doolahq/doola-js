@@ -29,6 +29,23 @@ resolved for this instance — from the publishable key's environment, or from t
 hardcoded host. For the preview peer it is the origin of the `/preview` URL the
 portal framed (see "The preview peer").
 
+## Frame URL
+
+The loader frames the SDK origin's root. Its query string is the only thing the
+app knows before the handshake, so it carries only what the app needs to start
+loading the right code early, and nothing secret:
+
+| param     | value                                      | notes                                                                                                                                                                                                           |
+| --------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pk`      | the partner's publishable key, URL-encoded | always present; public by design, it selects the branding                                                                                                                                                       |
+| `product` | `tax`                                      | the product the partner passed to `create()`. **Absent means formation**: the loader never sends `product=formation`, so a formation frame URL is the one every earlier loader built. Values are case-sensitive |
+
+The app refuses a `product` it does not know, `""` and `Tax` included, with
+`load-error` `invalid_request_error`, rather than falling back to formation: a
+partner who asked for tax must not be shown a formation wizard. The loader
+validates the option at `create()` first, so a refusal from the app means a
+loader newer than the app, which the release order (app first) rules out.
+
 ## Envelope
 
 Every message, both directions:
@@ -266,6 +283,14 @@ living in the partner's page).
        (still `retryable: false`): the email may not be the cause, so the
        founder is not told it is. On renewal it is `renewal_failed`.
      - a `code` not listed → `mint_failed` or `renewal_failed`, as below.
+   - `403` with `code` `E_SCOPE_NOT_ENTITLED` → on the first mint, `mint_failed`
+     but terminal: the session asked for a scope the partner's tenant does not
+     hold (`sdk:tax` without the tax feature), and every retry mints the same
+     refusal. Its `token-error` carries `retryable: false`, and the loader also
+     calls `onLoadError` with `invalid_request_error`, since the fix is the
+     partner's configuration. On renewal it is an ordinary, retryable
+     `renewal_failed`: the current token keeps working until it expires.
+     Any other `403` is `mint_failed` or `renewal_failed`, retryable.
    - anything else → `mint_failed` on first mint, `renewal_failed` on renewal.
 
    In every case the loader also posts `token-error` into every mounted frame,

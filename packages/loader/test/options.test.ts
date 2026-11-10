@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { presentationModeFrom, serializedOrigin } from '../src/options';
+import { presentationModeFrom, productFrom, serializedOrigin } from '../src/options';
 
 describe('serializedOrigin', () => {
   it('normalises a trailing slash, which the inbound origin check can never match', () => {
@@ -51,4 +51,33 @@ describe('presentationModeFrom', () => {
     );
     expect(() => presentationModeFrom({ mode: 'inline' } as never)).toThrow(/presentation.mode/);
   });
+});
+
+describe('productFrom', () => {
+  it('defaults to formation', () => {
+    expect(productFrom(undefined)).toBe('formation');
+    expect(productFrom({})).toBe('formation');
+    expect(productFrom({ product: undefined })).toBe('formation');
+  });
+
+  it('accepts the two products', () => {
+    expect(productFrom({ product: 'formation' })).toBe('formation');
+    expect(productFrom({ product: 'tax' })).toBe('tax');
+  });
+
+  it.each(['tax', null, ['tax'], 0])(
+    'throws on create(%j), which is not an options object',
+    (options) => {
+      expect(() => productFrom(options as never)).toThrow(/create\(\) takes an options object/);
+    },
+  );
+
+  it.each(['Tax', '', 'onboarding', 'FORMATION', null])(
+    'throws on %j, naming the accepted values',
+    (product) => {
+      expect(() => productFrom({ product } as never)).toThrow(
+        /product must be 'formation' or 'tax', received/,
+      );
+    },
+  );
 });

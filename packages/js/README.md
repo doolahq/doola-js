@@ -86,7 +86,8 @@ export const POST = createSessionHandler({
     return user ? { email: user.email, externalCustomerId: user.id } : null;
   },
 
-  // The browser gets the status, plus doola's error code when doola refused the customer.
+  // The browser gets the status, plus doola's error code when doola refused the customer or
+  // the session's scopes.
   // This says why, for your logs: a revoked key, an outage, or a field doola rejected.
   onFailure: (failure) => console.error('doola session failed', failure),
 });
@@ -126,6 +127,7 @@ const doola = await loadDoola({
   },
 
   // The customer submitted the wizard. Start your checkout for this company.
+  // Optional in the types, but required for formation: create() throws without it.
   onFormed: ({ companyId }) => startCheckout(companyId),
 });
 
@@ -134,8 +136,9 @@ const element = doola.create();
 document.getElementById('doola')!.append(element);
 ```
 
-`create()` takes no arguments. The app decides what to show from the customer's state: the wizard
-for a new customer, their company once one exists.
+`create()` with no arguments mounts formation. The app decides what to show from the customer's
+state: the wizard for a new customer, their company once one exists. For tax, see
+[Add tax filing](#add-tax-filing).
 
 Keep one instance per page: options are fixed by the first `loadDoola()` call. Frameworks,
 sign-out and the full-screen mode on phones: [Embed the SDK](https://docs.doola.com/sdk/embed).
@@ -198,6 +201,72 @@ From then on, the Partner API's [webhooks](https://docs.doola.com/api/webhooks) 
 formation is going.
 
 Edge cases, refunds and reconciliation: [Take payment](https://docs.doola.com/sdk/payments).
+
+## Add tax filing
+
+Tax uses the same package, the same keys and the same session route. Pass the product when you
+create the element:
+
+```ts
+import { loadDoola } from '@doola/js';
+
+const doola = await loadDoola({
+  publishableKey: 'pk_live_…',
+  fetchAccessToken: async () => {
+    const r = await fetch('/doola-session', { method: 'POST' });
+    if (!r.ok) {
+      const { code } = await r.json().catch(() => ({}));
+      throw Object.assign(new Error('doola session'), { status: r.status, code });
+    }
+    return r.json();
+  },
+  onAuthError: (error) => {
+    if (error.type === 'partner_session_expired') location.assign('/login');
+  },
+  // A formation component needs onFormed; create() throws without it. Tax has no checkout.
+  onLoadError: (error) => console.error('doola', error),
+});
+
+// Collects the company's information first when doola does not have it yet.
+document.getElementById('doola')!.append(doola.create({ product: 'tax' }));
+```
+
+Each product needs its scope on the session, which your server lists when it mints:
+`sdk:formation` for `create()` and `sdk:tax` for `create({ product: 'tax' })`. Without `scopes` the
+session is formation only. One session serves every element of a `loadDoola()` instance, so list
+every product your page mounts, every time: a session minted with `sdk:tax` alone makes a formation
+element refuse to load.
+
+<!-- example: tax-session-route -->
+
+```ts
+import { createSessionHandler } from '@doola/js/server';
+
+export const POST = createSessionHandler({
+  apiKey: process.env.DOOLA_API_KEY,
+  getCustomer: async (request) => {
+    const user = await getSignedInUser(request);
+    return user ? { email: user.email, externalCustomerId: user.id } : null;
+  },
+  // Set once, for every request. Mount only tax? Pass ['sdk:tax'].
+  scopes: ['sdk:formation', 'sdk:tax'],
+});
+```
+
+`createSessionHandler` sends the same `scopes` for every customer. If you offer tax to only some of
+your customers, call `createCustomerSession({ apiKey, customer, scopes })` in your own route instead
+and choose the scopes per request.
+
+Two failures are configuration, never the customer's to fix:
+
+- **Your account does not have tax yet.** doola refuses a mint that asks for `sdk:tax` with a 403
+  and the code `E_SCOPE_NOT_ENTITLED`, which the session route forwards. `onAuthError` gets
+  `mint_failed`, the element shows an error without Try again, and `onLoadError` gets
+  `invalid_request_error`. Ask doola to enable tax, or stop minting `sdk:tax`. The refusal fails
+  the whole session, so formation elements on the page stop loading too: add `sdk:tax` only once
+  doola confirms tax is enabled for your account.
+- **The session lacks the element's scope.** The element shows an error and `onLoadError` gets
+  `invalid_request_error`, saying which scope the session needs. Mint every product you mount.
 
 ## Documentation
 

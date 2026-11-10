@@ -6,6 +6,7 @@ import {
   LOAD_BACKSTOP_MS,
   PLACEHOLDER_FRAME_HEIGHT_PX,
   READY_AFTER_LOAD_MS,
+  SCOPE_NOT_ENTITLED_MESSAGE,
 } from '../../src/policy';
 import { APP_PAGE, navigatedFrame, startHarness, type Harness } from './harness';
 
@@ -69,13 +70,17 @@ async function mount(
     viewport?: { width: number; height: number };
     mintFails?: boolean;
     mintDelayMs?: number;
+    /** What the partner's route rejects with, in place of the 503 `mintFails` sends. */
+    mintRejection?: { status: number; code?: string };
+    product?: string;
+    withoutOnFormed?: boolean;
   } = {},
 ): Promise<void> {
   await page.setViewportSize(options.viewport ?? WIDE);
   await page.goto(harness.partnerOrigin);
 
   await page.evaluate(
-    ({ sdkOrigin, mintFails, mintDelayMs }) => {
+    ({ sdkOrigin, mintFails, mintDelayMs, mintRejection, product, withoutOnFormed }) => {
       const w = window as unknown as PartnerWindow;
       w.__events = [];
       w.__mintFails = mintFails;
@@ -89,7 +94,9 @@ async function mount(
 
           // A 5xx from the partner's route, which the loader reports as mint_failed.
           if (w.__mintFails) {
-            return Promise.reject(Object.assign(new Error('mint failed'), { status: 503 }));
+            return Promise.reject(
+              Object.assign(new Error('mint failed'), mintRejection ?? { status: 503 }),
+            );
           }
 
           const session = { accessToken: 'cs_harness', expiresIn: 3600 };
@@ -100,19 +107,26 @@ async function mount(
             : Promise.resolve(session);
         },
         onAuthError: (error) => w.__events.push({ handler: 'onAuthError', error }),
-        onFormed: (event) => w.__events.push({ handler: 'onFormed', event }),
+        ...(withoutOnFormed
+          ? {}
+          : { onFormed: (event) => w.__events.push({ handler: 'onFormed', event }) }),
         onLoadError: (error) => w.__events.push({ handler: 'onLoadError', error }),
         onLoaderStart: () => w.__events.push({ handler: 'onLoaderStart' }),
       };
 
       w.__instance = w.Doola!.init(options);
-      w.__element = w.__instance.create();
+      w.__element = w.__instance.create(
+        product === undefined ? undefined : { product: product as 'formation' | 'tax' },
+      );
       document.getElementById('mount')?.appendChild(w.__element);
     },
     {
       sdkOrigin: harness.sdkOrigin,
-      mintFails: options.mintFails ?? false,
+      mintFails: options.mintFails ?? options.mintRejection !== undefined,
       mintDelayMs: options.mintDelayMs ?? 0,
+      mintRejection: options.mintRejection,
+      product: options.product,
+      withoutOnFormed: options.withoutOnFormed ?? false,
     },
   );
 }
@@ -507,6 +521,83 @@ test('a version outside the supported window is dropped, and is not fatal', asyn
 
   await sendFromApp(frame, ready);
   await expect.poll(() => countOfType(frame, 'init')).toBe(1);
+});
+
+for (const product of [undefined, 'formation'] as const) {
+  test(`a formation frame (product ${product}) keeps the URL and title every earlier loader built`, async ({
+    page,
+  }) => {
+    await mount(page, product === undefined ? {} : { product });
+
+    const iframe = page.locator('#mount doola-embed iframe');
+    await expect(iframe).toHaveAttribute('src', `${harness.sdkOrigin}/?pk=pk_test_harness`);
+    await expect(iframe).toHaveAccessibleName('Company formation');
+  });
+}
+
+test('a tax frame carries the product on its URL and is named for it', async ({ page }) => {
+  await mount(page, { product: 'tax', withoutOnFormed: true });
+
+  const iframe = page.locator('#mount doola-embed iframe');
+  await expect(iframe).toHaveAttribute(
+    'src',
+    `${harness.sdkOrigin}/?pk=pk_test_harness&product=tax`,
+  );
+  await expect(iframe).toHaveAccessibleName('Tax filing');
+  await handshake(page);
+});
+
+test('an unknown product throws at create(), naming the accepted values', async ({ page }) => {
+  await expect(mount(page, { product: 'Tax' })).rejects.toThrow(
+    /product must be 'formation' or 'tax', received "Tax"/,
+  );
+  expect(sdkFrames(page)).toHaveLength(0);
+});
+
+test('without onFormed, init succeeds and only a formation create() throws', async ({ page }) => {
+  await expect(mount(page, { withoutOnFormed: true })).rejects.toThrow(
+    'doola: onFormed is required.',
+  );
+
+  const created = await page.evaluate(() => {
+    const w = window as unknown as PartnerWindow;
+    return w.__instance.create({ product: 'tax' }).tagName;
+  });
+  expect(created).toBe('DOOLA-EMBED');
+});
+
+test('a mint refused for its scope is terminal, and reported as a load error too', async ({
+  page,
+}) => {
+  await mount(page, { mintRejection: { status: 403, code: 'E_SCOPE_NOT_ENTITLED' } });
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBeGreaterThan(0);
+
+  const tokenErrors = (await received(frame)).filter((m) => m.data.type === 'token-error');
+  expect(tokenErrors[0]?.data.payload).toMatchObject({ reason: 'mint_failed', retryable: false });
+  expect((await eventsOf(page, 'onAuthError'))[0]?.error).toMatchObject({ type: 'mint_failed' });
+  expect((await eventsOf(page, 'onLoadError'))[0]?.error).toMatchObject({
+    type: 'invalid_request_error',
+    message: SCOPE_NOT_ENTITLED_MESSAGE,
+  });
+  // The mount's mint is refused before ready, and ready mints again: each
+  // handler hears the incident twice, which errors.md allows.
+  await expect.poll(async () => (await eventsOf(page, 'onAuthError')).length).toBe(2);
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(2);
+});
+
+test('any other 403 stays a retryable mint_failed with no load error', async ({ page }) => {
+  await mount(page, { mintRejection: { status: 403, code: 'E_TENANT_SUSPENDED' } });
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBeGreaterThan(0);
+
+  const [tokenError] = (await received(frame)).filter((m) => m.data.type === 'token-error');
+  expect(tokenError?.data.payload).toMatchObject({ reason: 'mint_failed', retryable: true });
+  expect(await eventsOf(page, 'onLoadError')).toHaveLength(0);
 });
 
 // One body, both labels: that these two land in the same place with the same

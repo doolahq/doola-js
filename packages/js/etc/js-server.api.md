@@ -21,6 +21,7 @@ export interface CustomerSessionFailure {
 export interface CustomerSessionOptions {
     apiKey: string | undefined;
     customer: DoolaCustomer;
+    scopes?: readonly DoolaScope[] | undefined;
 }
 
 // @public
@@ -45,10 +46,14 @@ export interface DoolaCustomer {
 }
 
 // @public
+export type DoolaScope = 'sdk:formation' | 'sdk:tax';
+
+// @public
 export interface SessionHandlerOptions {
     apiKey: string | undefined;
     getCustomer: (request: Request) => DoolaCustomer | null | Promise<DoolaCustomer | null>;
     onFailure?: ((failure: CustomerSessionFailure) => void | Promise<void>) | undefined;
+    scopes?: readonly DoolaScope[] | undefined;
 }
 
 // (No @packageDocumentation comment for this package)

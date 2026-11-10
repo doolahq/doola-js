@@ -15,7 +15,7 @@ export interface CustomerSession {
 
 // @public
 export interface Doola {
-    create(): DoolaComponent;
+    create(options?: DoolaCreateOptions): DoolaComponent;
 
     destroy(): void;
 
@@ -38,6 +38,11 @@ export interface DoolaAuthError {
 
 // @public
 export interface DoolaComponent extends HTMLElement {}
+
+// @public
+export interface DoolaCreateOptions {
+    product?: 'formation' | 'tax' | undefined;
+}
 
 // @public
 export interface DoolaGlobal {
@@ -67,7 +72,7 @@ export interface DoolaOptions {
 
     onAuthError: (error: DoolaAuthError) => void;
 
-    onFormed: (event: { companyId: string }) => void;
+    onFormed?: ((event: { companyId: string }) => void) | undefined;
 
     onLoadError?: ((error: DoolaLoadError) => void) | undefined;
 

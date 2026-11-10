@@ -1,6 +1,8 @@
+import { createCustomerSession } from '@doola/js/server';
 import { parseLoaderMessage, PROTOCOL_VERSION } from '@doola/sdk-protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SCOPE_NOT_ENTITLED_MESSAGE } from '../src/policy';
 import { SessionManager, tokenError } from '../src/session';
 
 const session = (expiresIn: number) => ({
@@ -11,8 +13,10 @@ const session = (expiresIn: number) => ({
 const TEN_MINUTES_S = 600;
 const TEN_MINUTES_MS = TEN_MINUTES_S * 1_000;
 
-const failure = (type: string, shown = type) =>
-  expect.objectContaining({ error: expect.objectContaining({ type }), shown });
+const failure = (type: string, shown = type, loadError?: unknown) =>
+  expect.objectContaining({ error: expect.objectContaining({ type }), shown, loadError });
+
+const SCOPE_LOAD_ERROR = { type: 'invalid_request_error', message: SCOPE_NOT_ENTITLED_MESSAGE };
 
 describe('SessionManager', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -210,6 +214,45 @@ describe('SessionManager', () => {
     expect(onAuthError).toHaveBeenCalledWith(failure(type));
   });
 
+  it('gives a first-mint 403 E_SCOPE_NOT_ENTITLED a load error', async () => {
+    const onAuthError = vi.fn();
+    const fetch = vi.fn().mockRejectedValue({ status: 403, code: 'E_SCOPE_NOT_ENTITLED' });
+    const manager = new SessionManager(fetch, onAuthError, vi.fn());
+
+    await expect(manager.current()).rejects.toBeDefined();
+
+    expect(onAuthError).toHaveBeenCalledWith(
+      failure('mint_failed', 'mint_failed', SCOPE_LOAD_ERROR),
+    );
+  });
+
+  it('keeps a renewal 403 E_SCOPE_NOT_ENTITLED an ordinary renewal_failed', async () => {
+    const onAuthError = vi.fn();
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(session(TEN_MINUTES_S))
+      .mockRejectedValue({ status: 403, code: 'E_SCOPE_NOT_ENTITLED' });
+    const manager = new SessionManager(fetch, onAuthError, vi.fn());
+
+    await manager.current();
+    manager.resume();
+    await vi.advanceTimersByTimeAsync(TEN_MINUTES_MS);
+
+    expect(onAuthError).toHaveBeenCalledWith(failure('renewal_failed'));
+  });
+
+  it.each([
+    ['without a code', { status: 403 }],
+    ['with another code', { status: 403, code: 'E_TENANT_SUSPENDED' }],
+    ['with the scope code on another status', { status: 400, code: 'E_SCOPE_NOT_ENTITLED' }],
+  ])('keeps a rejection %s an ordinary mint_failed', async (_, rejection) => {
+    const onAuthError = vi.fn();
+    const manager = new SessionManager(vi.fn().mockRejectedValue(rejection), onAuthError, vi.fn());
+
+    await expect(manager.current()).rejects.toBeDefined();
+    expect(onAuthError).toHaveBeenCalledWith(failure('mint_failed'));
+  });
+
   it('maps a first-fetch failure to mint_failed and a renewal failure to renewal_failed', async () => {
     const onAuthError = vi.fn();
     const fetch = vi
@@ -351,8 +394,8 @@ describe('parseSession and the wire', () => {
 
 describe('tokenError', () => {
   it('marks only the terminal auth cases as not retryable', () => {
-    const retryable = (type: Parameters<typeof tokenError>[0]['type']) =>
-      tokenError({ type, message: '' }, type).payload.retryable;
+    const retryable = (type: Parameters<typeof tokenError>[0]['error']['type']) =>
+      tokenError({ error: { type, message: '' }, shown: type }).payload.retryable;
 
     expect(retryable('partner_session_expired')).toBe(false);
     expect(retryable('email_in_use')).toBe(false);
@@ -362,11 +405,60 @@ describe('tokenError', () => {
     expect(retryable('renewal_failed')).toBe(true);
   });
 
+  it.each(['mint_failed', 'renewal_failed'] as const)(
+    'makes a failure marked terminal not retryable, even as %s',
+    (type) => {
+      expect(
+        tokenError({ error: { type, message: 'm' }, shown: type, terminal: true }).payload,
+      ).toEqual({
+        reason: type,
+        message: 'm',
+        retryable: false,
+      });
+    },
+  );
+
   it('shows the reason it is given, and keeps the retryability of the partner type', () => {
-    expect(tokenError({ type: 'email_in_use', message: 'm' }, 'mint_failed').payload).toEqual({
+    expect(
+      tokenError({ error: { type: 'email_in_use', message: 'm' }, shown: 'mint_failed' }).payload,
+    ).toEqual({
       reason: 'mint_failed',
       message: 'm',
       retryable: false,
     });
+  });
+});
+
+describe('the scope 403 across @doola/js/server and the loader', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('is forwarded with a code the loader classifies as terminal', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          { payload: null, error: { code: 'E_SCOPE_NOT_ENTITLED', message: 'doola says' } },
+          { status: 403 },
+        ),
+      ),
+    );
+    const { status, code } = await createCustomerSession({
+      apiKey: 'dk_test_s3cr3tv4lu3',
+      customer: { email: 'founder@example.com', externalCustomerId: 'usr_1' },
+      scopes: ['sdk:tax'],
+    });
+    const onAuthError = vi.fn();
+    const manager = new SessionManager(
+      vi.fn().mockRejectedValue({ status, code }),
+      onAuthError,
+      vi.fn(),
+    );
+
+    await expect(manager.current()).rejects.toBeDefined();
+
+    expect(onAuthError).toHaveBeenCalledWith(
+      failure('mint_failed', 'mint_failed', SCOPE_LOAD_ERROR),
+    );
+    expect(tokenError(onAuthError.mock.calls[0]![0]).payload.retryable).toBe(false);
   });
 });

@@ -10,7 +10,7 @@ import {
   type InstanceState,
 } from './component';
 import { envFromPublishableKey } from './env';
-import { presentationModeFrom, serializedOrigin } from './options';
+import { presentationModeFrom, productFrom, serializedOrigin } from './options';
 import { SessionManager, tokenError } from './session';
 
 /** `auto` promotes to full screen below this width. Loader policy — see `Presentation` in the contract. */
@@ -44,7 +44,6 @@ function init(options: DoolaOptions): Doola {
       'doola: onAuthError is required. When your own user session expires, only your page can send the user back to your login.',
     );
   }
-  if (typeof onFormed !== 'function') throw new Error('doola: onFormed is required.');
 
   // The key always resolves the environment — even for CNAME partners,
   // whose `origin` overrides only where the app is served from — so the
@@ -75,9 +74,10 @@ function init(options: DoolaOptions): Doola {
   // it never hangs on an unanswered token-request, the partner gets onAuthError.
   const sessions = new SessionManager(
     fetchAccessToken,
-    ({ error, shown }) => {
-      broadcast(tokenError(error, shown));
-      onAuthError(error);
+    (failure) => {
+      broadcast(tokenError(failure));
+      onAuthError(failure.error);
+      if (failure.loadError) handlers.onLoadError?.(failure.loadError);
     },
     (session) => {
       for (const frame of mounted) frame.deliver(session);
@@ -93,14 +93,20 @@ function init(options: DoolaOptions): Doola {
   };
 
   const instance: Doola = {
-    create(): DoolaComponent {
+    create(createOptions): DoolaComponent {
       assertLive('create');
+
+      const product = productFrom(createOptions);
+      // Checked here, not at init: a partner that mounts only tax has no checkout to hand off to.
+      if (product === 'formation' && typeof handlers.onFormed !== 'function')
+        throw new Error('doola: onFormed is required.');
 
       const element = document.createElement(ELEMENT_TAG) as DoolaElement;
       element.controller = new FrameController(element, {
         isDestroyed: () => !isLive(),
         sdkOrigin,
         publishableKey,
+        product,
         sessions,
         state,
         handlers,
