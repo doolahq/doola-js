@@ -5,11 +5,6 @@
 ```ts
 
 // @public
-export interface CreateOptions {
-    product?: 'formation' | 'tax' | undefined;
-}
-
-// @public
 export interface CustomerSession {
     accessToken: string;
 
@@ -20,7 +15,7 @@ export interface CustomerSession {
 
 // @public
 export interface Doola {
-    create(options?: CreateOptions): DoolaComponent;
+    create(options?: DoolaCreateOptions): DoolaComponent;
 
     destroy(): void;
 
@@ -43,6 +38,11 @@ export interface DoolaAuthError {
 
 // @public
 export interface DoolaComponent extends HTMLElement {}
+
+// @public
+export interface DoolaCreateOptions {
+    product?: 'formation' | 'tax' | undefined;
+}
 
 // @public
 export interface DoolaGlobal {

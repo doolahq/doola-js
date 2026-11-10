@@ -251,7 +251,7 @@ export interface DoolaComponent extends HTMLElement {}
  *
  * Deliberately an interface, so options can be added in later minors.
  */
-export interface CreateOptions {
+export interface DoolaCreateOptions {
   /**
    * What the component shows. `formation` (the default) is the company
    * formation wizard; `tax` is the tax filing flow, which first collects the
@@ -282,7 +282,7 @@ export interface Doola {
    * Throws for a product it does not know, and for a formation component
    * when `loadDoola` was given no `onFormed`.
    */
-  create(options?: CreateOptions): DoolaComponent;
+  create(options?: DoolaCreateOptions): DoolaComponent;
 
   /**
    * Runtime updates. Only `locale` can change after init. Merge

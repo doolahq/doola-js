@@ -6,6 +6,7 @@ import {
   createSessionHandler,
   type CustomerSessionResult,
   type DoolaCustomer,
+  type DoolaScope,
   type SessionHandlerOptions,
 } from '../src/server';
 
@@ -160,6 +161,16 @@ describe('createSessionHandler', () => {
       }
     },
   );
+
+  it('keeps the scopes it was created with when the caller later changes the array', async () => {
+    const scopes: DoolaScope[] = ['sdk:formation'];
+    const route = handler(undefined, undefined, undefined, scopes);
+    scopes.push('sdk:tax');
+
+    await call(route);
+
+    expect(sentRequest().body).toEqual({ ...CUSTOMER, scopes: ['sdk:formation'] });
+  });
 
   it('forwards the optional profile fields and nothing else from the customer', async () => {
     const profile = {

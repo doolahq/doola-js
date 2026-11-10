@@ -1,4 +1,4 @@
-import type { CreateOptions, Presentation } from '@doola/js';
+import type { DoolaCreateOptions, Presentation } from '@doola/js';
 
 /**
  * Validation of the options that would otherwise fail silently. Everything
@@ -52,15 +52,23 @@ export function presentationModeFrom(
   return mode;
 }
 
-export type Product = NonNullable<CreateOptions['product']>;
+export type Product = NonNullable<DoolaCreateOptions['product']>;
 
 /**
  * The product, defaulting to formation. Validated here because the app refuses
  * an unknown value only once the frame has loaded, as a load error a partner
  * might never connect to the call that caused it.
  */
-export function productFrom(options: CreateOptions | undefined): Product {
-  const product = options?.product ?? 'formation';
+export function productFrom(options: DoolaCreateOptions | undefined): Product {
+  if (
+    options !== undefined &&
+    (typeof options !== 'object' || options === null || Array.isArray(options))
+  )
+    throw new Error(
+      `doola: create() takes an options object, such as { product: 'tax' }, received ${JSON.stringify(options)}.`,
+    );
+
+  const product = options?.product === undefined ? 'formation' : options.product;
 
   if (product !== 'formation' && product !== 'tax')
     throw new Error(

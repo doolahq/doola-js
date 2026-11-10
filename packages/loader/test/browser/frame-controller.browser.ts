@@ -582,6 +582,10 @@ test('a mint refused for its scope is terminal, and reported as a load error too
     type: 'invalid_request_error',
     message: SCOPE_NOT_ENTITLED_MESSAGE,
   });
+  // The mount's mint is refused before ready, and ready mints again: each
+  // handler hears the incident twice, which errors.md allows.
+  await expect.poll(async () => (await eventsOf(page, 'onAuthError')).length).toBe(2);
+  await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(2);
 });
 
 test('any other 403 stays a retryable mint_failed with no load error', async ({ page }) => {

@@ -44,12 +44,13 @@ const DOOLA_CODE = /^E_[A-Z0-9_]+$/;
 
 /**
  * What the partner's `onAuthError` is told, and the reason the frame shows.
- * `loadError` is set when the partner's configuration is at fault, which no
- * retry can fix, so it also reaches `onLoadError`.
+ * `terminal` overrides a type that is otherwise retryable; `loadError` is set
+ * when the partner's configuration is at fault, so it also reaches `onLoadError`.
  */
-export interface AuthFailure {
+interface AuthFailure {
   error: DoolaAuthError;
   shown: DoolaAuthError['type'];
+  terminal?: boolean | undefined;
   loadError?: DoolaLoadError | undefined;
 }
 
@@ -68,9 +69,10 @@ function classifyRejection(error: unknown, renewal: boolean): Classified {
   const fallback = renewal ? 'renewal_failed' : 'mint_failed';
 
   if (status === 401) return same('partner_session_expired');
-  if (status === 403 && code === SCOPE_NOT_ENTITLED) {
+  if (status === 403 && code === SCOPE_NOT_ENTITLED && !renewal) {
     return {
       ...same(fallback),
+      terminal: true,
       loadError: { type: 'invalid_request_error', message: SCOPE_NOT_ENTITLED_MESSAGE },
     };
   }
@@ -119,19 +121,19 @@ const RETRYABLE: Record<DoolaAuthError['type'], boolean> = {
 /**
  * `retryable` follows what the partner is told, and `reason` what the frame
  * shows, so a terminal failure shown with neutral copy stays terminal. A
- * failure with a load error is terminal whatever its type.
+ * failure marked `terminal` is terminal whatever its type.
  */
 export function tokenError({
   error,
   shown,
-  loadError,
+  terminal,
 }: AuthFailure): Extract<LoaderMessage, { type: 'token-error' }> {
   return {
     type: 'token-error',
     payload: {
       reason: shown,
       message: error.message,
-      retryable: !loadError && RETRYABLE[error.type],
+      retryable: !terminal && RETRYABLE[error.type],
     },
   };
 }
@@ -296,9 +298,9 @@ export class SessionManager {
     } catch (error: unknown) {
       if (this.stopped) throw error;
 
-      const { type, shown, loadError } = classifyRejection(error, renewal);
+      const { type, shown, terminal, loadError } = classifyRejection(error, renewal);
       const message = error instanceof Error ? error.message : String(error);
-      this.onAuthError({ error: { type, message }, shown, loadError });
+      this.onAuthError({ error: { type, message }, shown, terminal, loadError });
 
       throw error;
     } finally {

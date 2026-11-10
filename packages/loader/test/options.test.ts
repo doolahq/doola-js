@@ -65,7 +65,14 @@ describe('productFrom', () => {
     expect(productFrom({ product: 'tax' })).toBe('tax');
   });
 
-  it.each(['Tax', '', 'onboarding', 'FORMATION'])(
+  it.each(['tax', null, ['tax'], 0])(
+    'throws on create(%j), which is not an options object',
+    (options) => {
+      expect(() => productFrom(options as never)).toThrow(/create\(\) takes an options object/);
+    },
+  );
+
+  it.each(['Tax', '', 'onboarding', 'FORMATION', null])(
     'throws on %j, naming the accepted values',
     (product) => {
       expect(() => productFrom({ product } as never)).toThrow(

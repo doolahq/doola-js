@@ -127,6 +127,7 @@ const doola = await loadDoola({
   },
 
   // The customer submitted the wizard. Start your checkout for this company.
+  // Optional in the types, but required for formation: create() throws without it.
   onFormed: ({ companyId }) => startCheckout(companyId),
 });
 
@@ -261,7 +262,9 @@ Two failures are configuration, never the customer's to fix:
 - **Your account does not have tax yet.** doola refuses a mint that asks for `sdk:tax` with a 403
   and the code `E_SCOPE_NOT_ENTITLED`, which the session route forwards. `onAuthError` gets
   `mint_failed`, the element shows an error without Try again, and `onLoadError` gets
-  `invalid_request_error`. Ask doola to enable tax, or stop minting `sdk:tax`.
+  `invalid_request_error`. Ask doola to enable tax, or stop minting `sdk:tax`. The refusal fails
+  the whole session, so formation elements on the page stop loading too: add `sdk:tax` only once
+  doola confirms tax is enabled for your account.
 - **The session lacks the element's scope.** The element shows an error and `onLoadError` gets
   `invalid_request_error`, saying which scope the session needs. Mint every product you mount.
 

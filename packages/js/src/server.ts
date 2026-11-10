@@ -338,7 +338,8 @@ export async function createCustomerSession(
 export function createSessionHandler(
   options: SessionHandlerOptions,
 ): (request: Request) => Promise<Response> {
-  const { apiKey, getCustomer, onFailure, scopes } = options;
+  const { apiKey, getCustomer, onFailure } = options;
+  const scopes = options.scopes && [...options.scopes];
   const checked = apiKey ? credentials(apiKey) : undefined;
 
   return async (request) => {
