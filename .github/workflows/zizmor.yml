@@ -19,7 +19,11 @@ jobs:
         with:
           persist-credentials: false
 
-      # Findings go to code scanning, which annotates the pull request.
-      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
-        with:
-          version: 1.30.1
+      # Findings go to code scanning, which annotates only the lines a pull
+      # request changes. In SARIF mode zizmor exits 0 whatever it finds, so a
+      # green job is not a clean scan; check the tool:zizmor alerts instead.
+      #
+      # No `version` input on purpose: the default, `latest`, is a hash-pinned
+      # lock inside the action, so each action SHA fixes the zizmor version and
+      # Dependabot's bumps of the action move zizmor with it.
+      - uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
