@@ -72,11 +72,13 @@ function loaderTags(page: Page): Promise<{ async: boolean; crossOrigin: string |
 }
 
 /** Mounts the loaded instance into `#mount` and waits for the frame to navigate to the app. */
-async function mountFrame(page: Page): Promise<void> {
-  await page.evaluate(() => {
+async function mountFrame(page: Page, product?: 'formation' | 'tax'): Promise<void> {
+  await page.evaluate((p) => {
     const w = window as unknown as ShimWindow;
-    document.getElementById('mount')?.appendChild(w.__instance.create());
-  });
+    document
+      .getElementById('mount')
+      ?.appendChild(w.__instance.create(p === undefined ? undefined : { product: p }));
+  }, product);
 
   await expect(page.locator('#mount doola-embed iframe')).toHaveCount(1);
   await navigatedFrame(page, harness.sdkOrigin);
@@ -96,15 +98,22 @@ test('injects one async, anonymous-CORS tag, however many calls race it', async 
   expect(await loaderTags(page)).toEqual([{ async: true, crossOrigin: 'anonymous' }]);
 });
 
-test('resolves with the real loader, whose create() mounts the app frame', async ({ page }) => {
-  await page.route(LOADER_URL, (route) => edge(route));
-  await openShimPage(page);
+for (const [product, name] of [
+  [undefined, 'Company formation'],
+  ['tax', 'Tax filing'],
+] as const) {
+  test(`resolves with the real loader, whose create() mounts the ${name} frame`, async ({
+    page,
+  }) => {
+    await page.route(LOADER_URL, (route) => edge(route));
+    await openShimPage(page);
 
-  expect(await load(page)).toEqual({ loaded: true });
+    expect(await load(page)).toEqual({ loaded: true });
 
-  await mountFrame(page);
-  await expect(page.locator('#mount doola-embed iframe')).toHaveAccessibleName('Company formation');
-});
+    await mountFrame(page, product);
+    await expect(page.locator('#mount doola-embed iframe')).toHaveAccessibleName(name);
+  });
+}
 
 const failures = {
   '404s': (route: Route) => route.fulfill({ status: 404, body: 'nope' }),

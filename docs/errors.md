@@ -18,18 +18,18 @@ contract wins and this file has the bug.
 | `email_in_use`            | The email the route sent cannot be this customer's, because it belongs to a doola account outside the partner's tenant, to a non-customer login such as a partner-portal user, or to another account it would be renamed onto: a 409 whose `code` is `E_EMAIL_IN_USE`. Also a first-mint 409 with no `code`, from a route that forwards only the status; the frame then shows its generic failure, since the email may not be the cause. First mint only; on renewal a 409 with this code or none is `renewal_failed`. | Terminal, retrying never succeeds. Surface a support path or ask for a different email.                                    |
 | `external_id_conflict`    | doola could not bind the customer to what the route sent: a 409 whose `code` is `E_RESOURCE_CONFLICT`. Usually the `externalCustomerId`: the customer is bound to a different id, or this id is bound to another customer. Also a customer from before doola's accounts were unified, which cannot take a new email. Mint or renewal.                                                                                                                                                                                  | Terminal. Check the mapping between your users and `externalCustomerId`, or ask doola support; the customer cannot fix it. |
 | `customer_revoked`        | doola deactivated this customer: a 409 whose `code` is `E_CUSTOMER_REVOKED`. Mint or renewal.                                                                                                                                                                                                                                                                                                                                                                                                                          | Terminal. Surface a support path.                                                                                          |
-| `mint_failed`             | First token fetch failed for a transient or unknown reason: network, malformed response, or a 5xx from their route, including the 502 it uses for doola-side auth failures (see `FetchAccessToken`). Statuses with their own meaning are mapped to the cases above, never here, except a 409 with a `code` not listed above.                                                                                                                                                                                           | Retry / surface their own error state.                                                                                     |
+| `mint_failed`             | First token fetch failed for a transient or unknown reason: network, malformed response, or a 5xx from their route, including the 502 it uses for doola-side auth failures (see `FetchAccessToken`). Statuses with their own meaning are mapped to the cases above, never here, except a 409 with a `code` not listed above. A 403 `E_SCOPE_NOT_ENTITLED` lands here too, but is terminal: see [Scopes](#scopes).                                                                                                      | Retry / surface their own error state.                                                                                     |
 | `renewal_failed`          | A mid-session renewal failed for a non-401 reason. The app keeps working until the current token expires.                                                                                                                                                                                                                                                                                                                                                                                                              | Usually nothing; escalates to `partner_session_expired` semantics if their route starts returning 401.                     |
 
 ## Load errors → `onLoadError`
 
-| type                    | meaning                                                                            |
-| ----------------------- | ---------------------------------------------------------------------------------- |
-| `api_connection_error`  | Could not reach doola.                                                             |
-| `authentication_error`  | Session rejected by the API (expired mid-flight and backstop renewal also failed). |
-| `invalid_request_error` | 4xx caused by integration configuration; not retryable.                            |
-| `render_error`          | The component could not render, or never started at all — see below.               |
-| `api_error`             | Everything else, including doola 5xx.                                              |
+| type                    | meaning                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `api_connection_error`  | Could not reach doola.                                                                                       |
+| `authentication_error`  | Session rejected by the API (expired mid-flight and backstop renewal also failed).                           |
+| `invalid_request_error` | 4xx caused by integration configuration; not retryable. Includes both scope failures, see [Scopes](#scopes). |
+| `render_error`          | The component could not render, or never started at all — see below.                                         |
+| `api_error`             | Everything else, including doola 5xx.                                                                        |
 
 Both handlers may be called more than once per incident and must be idempotent
 (`onAuthError` in the contract says when it fires). In most cases the component
@@ -68,3 +68,17 @@ partner's choice: a blank fixed sheet the founder cannot scroll off is worse
 than a small box they can, and `onLoadError` has just told the partner to act.
 A frame that recovers on a late `ready` is promoted again if the viewport still
 asks for it, so the recovery path is unaffected.
+
+## Scopes
+
+Each product needs its scope on the customer session: `sdk:formation` for
+`create()`, `sdk:tax` for `create({ product: 'tax' })`. The partner's server
+lists them when it mints (the `scopes` option on `@doola/js/server`); omitting
+them mints formation only. One session serves every component of an instance,
+so a page that mounts both products mints both scopes, every time. Two
+failures follow, both configuration, never the founder's to fix:
+
+| failure                                                           | what the partner sees                                                                                                                                                                                                                                                                                                                                                                                        | response                                             |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| The account does not have tax, and the mint asked for `sdk:tax`   | doola refuses the mint with a 403 `E_SCOPE_NOT_ENTITLED`, which the session route forwards as `{ code }`. `onAuthError` gets `mint_failed` (or `renewal_failed`), but the frame offers no Try again, and `onLoadError` gets `invalid_request_error` with the message `The customer session asked for a scope this account is not enabled for. Ask doola to enable tax, or mint the session without sdk:tax.` | Ask doola to enable tax, or stop minting `sdk:tax`.  |
+| A component mounted with a session that lacks its product's scope | The frame shows an error, and the app reports `onLoadError` with `invalid_request_error`, saying which scope the session needs. A session minted with `sdk:tax` alone makes a formation component refuse.                                                                                                                                                                                                    | Mint every scope for every product the page creates. |

@@ -65,3 +65,12 @@ export const LOAD_FAILURE_MESSAGES = {
   /** It spoke, and this build refused the version. */
   versionRefused: 'The doola frame spoke a protocol version this loader does not support.',
 } as const;
+
+/**
+ * What `onLoadError` says when the mint refused a scope the partner's account
+ * does not hold. Only `sdk:tax` needs a feature today, so the sentence names it:
+ * the fix is a conversation with doola or a change to the partner's mint, and
+ * the founder's Try again would repeat the same refusal.
+ */
+export const SCOPE_NOT_ENTITLED_MESSAGE =
+  'The customer session asked for a scope this account is not enabled for. Ask doola to enable tax, or mint the session without sdk:tax.';

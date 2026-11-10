@@ -40,8 +40,9 @@ function handler(
   getCustomer: () => DoolaCustomer | null = () => CUSTOMER,
   apiKey: string | undefined = LIVE_KEY,
   onFailure?: SessionHandlerOptions['onFailure'],
+  scopes?: SessionHandlerOptions['scopes'],
 ) {
-  return createSessionHandler({ apiKey, getCustomer, onFailure });
+  return createSessionHandler({ apiKey, getCustomer, onFailure, scopes });
 }
 
 function call(route = handler()) {
@@ -138,6 +139,27 @@ describe('createSessionHandler', () => {
     expect(sent.headers.get('content-type')).toBe('application/json');
     expect(sent.body).toEqual({ email: 'founder@example.com', externalCustomerId: 'usr_1' });
   });
+
+  it('sends no scopes field when scopes is omitted, so the body is what it always was', async () => {
+    await call();
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(init?.body).toBe('{"email":"founder@example.com","externalCustomerId":"usr_1"}');
+  });
+
+  it.each([[['sdk:tax']], [['sdk:formation', 'sdk:tax']], [[]]] as const)(
+    'sends scopes %j for every request when set',
+    async (scopes) => {
+      const route = handler(undefined, undefined, undefined, scopes);
+
+      await call(route);
+      await call(route);
+
+      for (const [, init] of fetchMock.mock.calls) {
+        expect(JSON.parse(String(init?.body))).toEqual({ ...CUSTOMER, scopes });
+      }
+    },
+  );
 
   it('forwards the optional profile fields and nothing else from the customer', async () => {
     const profile = {
@@ -291,6 +313,18 @@ describe('createSessionHandler', () => {
       '{"code":"E_RESOURCE_CONFLICT"}',
     ],
     [
+      "doola's 403 for a scope the tenant does not hold",
+      () => fetchMock.mockResolvedValue(doolaError(403, 'E_SCOPE_NOT_ENTITLED')),
+      { reason: 'doola_error', doolaStatus: 403, doolaCode: 'E_SCOPE_NOT_ENTITLED' },
+      '{"code":"E_SCOPE_NOT_ENTITLED"}',
+    ],
+    [
+      "doola's other 403s",
+      () => fetchMock.mockResolvedValue(doolaError(403, 'E_TENANT_SUSPENDED')),
+      { reason: 'doola_error', doolaStatus: 403, doolaCode: 'E_TENANT_SUSPENDED' },
+      '',
+    ],
+    [
       'an error without an envelope',
       () => fetchMock.mockResolvedValue(new Response('<html>', { status: 503 })),
       { reason: 'doola_error', doolaStatus: 503 },
@@ -309,7 +343,7 @@ describe('createSessionHandler', () => {
       '',
     ],
   ])(
-    'tells onFailure about %s, and the browser only the status, and the code of a 409',
+    'tells onFailure about %s, and the browser only the status, and the code of a 409 or the scope 403',
     async (_, arrange, failure, browserBody) => {
       arrange();
       const onFailure = vi.fn();
@@ -427,6 +461,34 @@ describe('createCustomerSession', () => {
     await expect(
       createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER }),
     ).resolves.toMatchObject({ status: 409, body: null, code: 'E_CUSTOMER_REVOKED' });
+  });
+
+  it('sends scopes when set', async () => {
+    await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, scopes: ['sdk:tax'] });
+
+    expect(sentRequest().body).toEqual({ ...CUSTOMER, scopes: ['sdk:tax'] });
+  });
+
+  it("carries the code of doola's scope 403, so the loader stops the retry", async () => {
+    fetchMock.mockResolvedValue(doolaError(403, 'E_SCOPE_NOT_ENTITLED'));
+
+    await expect(
+      createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, scopes: ['sdk:tax'] }),
+    ).resolves.toEqual({
+      status: 403,
+      body: null,
+      code: 'E_SCOPE_NOT_ENTITLED',
+      failure: { reason: 'doola_error', doolaStatus: 403, doolaCode: 'E_SCOPE_NOT_ENTITLED' },
+    });
+  });
+
+  it("never carries the code of doola's other 403s, which are about the key or tenant", async () => {
+    fetchMock.mockResolvedValue(doolaError(403, 'E_ACCESS_DENIED'));
+
+    const result = await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER });
+
+    expect(result.status).toBe(403);
+    expect(result).not.toHaveProperty('code');
   });
 
   it("never carries the code of doola's 401, which is about the key", async () => {

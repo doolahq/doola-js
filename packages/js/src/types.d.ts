@@ -53,7 +53,9 @@ export interface CustomerSession {
  * `throw Object.assign(new Error('doola session'), { status: r.status, code })`.
  * `code` is doola's `error.code`, which the route forwards as `{ code }`
  * (`@doola/js/server` does): doola answers 409 for several reasons, and
- * the code is the only thing that tells them apart.
+ * the code is the only thing that tells them apart. It also marks the
+ * 403 `E_SCOPE_NOT_ENTITLED`, a session asking for a scope your account
+ * does not hold, which retrying never fixes.
  * The route itself must never flatten a failure to 200, and must never
  * forward doola's own 401: that status means the partner's key or
  * tenant, not the customer's session, and the loader reads any 401 as
@@ -174,7 +176,11 @@ export interface DoolaOptions {
   onAuthError: (error: DoolaAuthError) => void;
 
   /**
-   * The payment handoff. Fires when the customer completes the wizard
+   * The payment handoff, for the formation product. Required to create a
+   * formation component, and `create()` throws without it; a partner that
+   * mounts only tax can leave it out.
+   *
+   * Fires when the customer completes the wizard
    * and the draft formation is submitted. The company then reads as
    * `formationSubmissionStatus: "AWAITING_PAYMENT"` from
    * GET /v1/partner/companies/{companyId} — nothing is filed and nothing
@@ -195,7 +201,7 @@ export interface DoolaOptions {
    * checkout for this company", not as "a new company exists": creating a
    * fresh order per call would charge a returning founder twice.
    */
-  onFormed: (event: { companyId: string }) => void;
+  onFormed?: ((event: { companyId: string }) => void) | undefined;
 
   /** Fired the first time any UI (including a loading state) is visible inside the frame. */
   onLoaderStart?: (() => void) | undefined;
@@ -240,17 +246,43 @@ export interface DoolaOptions {
  */
 export interface DoolaComponent extends HTMLElement {}
 
+/**
+ * Options for {@link Doola.create}.
+ *
+ * Deliberately an interface, so options can be added in later minors.
+ */
+export interface CreateOptions {
+  /**
+   * What the component shows. `formation` (the default) is the company
+   * formation wizard; `tax` is the tax filing flow, which first collects the
+   * company's information when doola does not have it yet. Any other value
+   * throws.
+   *
+   * The customer session must carry the product's scope: `sdk:formation`
+   * or `sdk:tax`, which your server lists when it mints the session. A
+   * component whose product the session lacks shows an error and reports
+   * `onLoadError` with `invalid_request_error`. One session serves every
+   * component of an instance, so a page that mounts both products mints
+   * both scopes.
+   */
+  product?: 'formation' | 'tax' | undefined;
+}
+
 /** The initialized SDK instance. */
 export interface Doola {
   /**
-   * Returns the embedded-app element. Takes no arguments: the partner
-   * does not choose what renders — on every mount the app resolves the
-   * session's customer and routes. No company yet lands on the formation
-   * wizard; an existing company lands on that company's view, whose
-   * state decides the screen — right after checkout that is the waiting
-   * state, until the partner's payment confirmation reaches doola.
+   * Returns the embedded-app element for one product, formation when
+   * `options` names none. The partner chooses the product, not the screen:
+   * on every mount the app resolves the session's customer and routes.
+   * For formation, no company yet lands on the wizard; an existing company
+   * lands on that company's view, whose state decides the screen — right
+   * after checkout that is the waiting state, until the partner's payment
+   * confirmation reaches doola.
+   *
+   * Throws for a product it does not know, and for a formation component
+   * when `loadDoola` was given no `onFormed`.
    */
-  create(): DoolaComponent;
+  create(options?: CreateOptions): DoolaComponent;
 
   /**
    * Runtime updates. Only `locale` can change after init. Merge

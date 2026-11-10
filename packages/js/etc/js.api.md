@@ -5,6 +5,11 @@
 ```ts
 
 // @public
+export interface CreateOptions {
+    product?: 'formation' | 'tax' | undefined;
+}
+
+// @public
 export interface CustomerSession {
     accessToken: string;
 
@@ -15,7 +20,7 @@ export interface CustomerSession {
 
 // @public
 export interface Doola {
-    create(): DoolaComponent;
+    create(options?: CreateOptions): DoolaComponent;
 
     destroy(): void;
 
@@ -67,7 +72,7 @@ export interface DoolaOptions {
 
     onAuthError: (error: DoolaAuthError) => void;
 
-    onFormed: (event: { companyId: string }) => void;
+    onFormed?: ((event: { companyId: string }) => void) | undefined;
 
     onLoadError?: ((error: DoolaLoadError) => void) | undefined;
 

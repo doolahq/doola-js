@@ -14,6 +14,7 @@ import {
   PLACEHOLDER_FRAME_HEIGHT_PX,
   READY_AFTER_LOAD_MS,
 } from './policy';
+import type { Product } from './options';
 import type { SessionManager } from './session';
 
 const INLINE_FRAME_CSS = `width:100%;border:0;display:block;height:${PLACEHOLDER_FRAME_HEIGHT_PX}px;`;
@@ -33,6 +34,12 @@ function isUnsupportedVersion(data: unknown): boolean {
   const { v } = data as { v?: unknown };
   return Number.isInteger(v) && !isSupportedVersion(v);
 }
+
+/** White-labeled: a screen reader announces this name on the partner's page. */
+const FRAME_TITLES: Record<Product, string> = {
+  formation: 'Company formation',
+  tax: 'Tax filing',
+};
 
 /** The one custom-element tag; what create() returns and partners mount. */
 export const ELEMENT_TAG = 'doola-embed';
@@ -57,6 +64,7 @@ export interface FrameConfig {
   /** Resolved for this instance: the key's environment, or the partner's CNAME origin. */
   sdkOrigin: string;
   publishableKey: string;
+  product: Product;
   sessions: SessionManager;
   state: InstanceState;
   handlers: InstanceHandlers;
@@ -164,9 +172,12 @@ export class FrameController {
 
     const iframe = document.createElement('iframe');
 
-    iframe.src = `${this.config.sdkOrigin}/?pk=${encodeURIComponent(this.config.publishableKey)}`;
-    // White-labeled: a screen reader announces this name on the partner's page.
-    iframe.title = 'Company formation';
+    const { sdkOrigin, publishableKey, product } = this.config;
+    // Formation is the absent product, so its URL is the one every earlier loader built (docs/protocol.md).
+    iframe.src =
+      `${sdkOrigin}/?pk=${encodeURIComponent(publishableKey)}` +
+      (product === 'formation' ? '' : `&product=${product}`);
+    iframe.title = FRAME_TITLES[product];
     iframe.allow = 'clipboard-write';
     iframe.style.cssText = INLINE_FRAME_CSS;
 
@@ -408,7 +419,7 @@ export class FrameController {
         // DoolaOptions.onFormed in the contract — because anything handed to
         // partner JS can be tampered with before their checkout reads it. A
         // future app field must not leak by accident.
-        this.config.handlers.onFormed({ companyId: message.payload.companyId });
+        this.config.handlers.onFormed?.({ companyId: message.payload.companyId });
         break;
       case 'auth-error':
         this.config.handlers.onAuthError(message.payload);

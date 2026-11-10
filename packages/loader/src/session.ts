@@ -1,5 +1,7 @@
-import type { CustomerSession, DoolaAuthError, FetchAccessToken } from '@doola/js';
+import type { CustomerSession, DoolaAuthError, DoolaLoadError, FetchAccessToken } from '@doola/js';
 import type { LoaderMessage } from '@doola/sdk-protocol';
+
+import { SCOPE_NOT_ENTITLED_MESSAGE } from './policy';
 
 /**
  * Renew at this fraction of the token's lifetime. Loader policy,
@@ -30,6 +32,9 @@ const CONFLICTS: ReadonlyMap<string, DoolaAuthError['type']> = new Map([
   ['E_CUSTOMER_REVOKED', 'customer_revoked'],
 ] as const);
 
+/** A 403 that names the scope, not the key or tenant, so a retry can never succeed. */
+const SCOPE_NOT_ENTITLED = 'E_SCOPE_NOT_ENTITLED';
+
 /**
  * doola's codes only. A client library puts its own `code` on a rejection
  * (axios rejects a 409 with `ERR_BAD_REQUEST`), and that must not take a
@@ -37,13 +42,18 @@ const CONFLICTS: ReadonlyMap<string, DoolaAuthError['type']> = new Map([
  */
 const DOOLA_CODE = /^E_[A-Z0-9_]+$/;
 
-/** What the partner's `onAuthError` is told, and the reason the frame shows. */
-interface AuthFailure {
+/**
+ * What the partner's `onAuthError` is told, and the reason the frame shows.
+ * `loadError` is set when the partner's configuration is at fault, which no
+ * retry can fix, so it also reaches `onLoadError`.
+ */
+export interface AuthFailure {
   error: DoolaAuthError;
   shown: DoolaAuthError['type'];
+  loadError?: DoolaLoadError | undefined;
 }
 
-type Classified = { type: DoolaAuthError['type']; shown: DoolaAuthError['type'] };
+type Classified = Omit<AuthFailure, 'error'> & { type: DoolaAuthError['type'] };
 
 const same = (type: DoolaAuthError['type']): Classified => ({ type, shown: type });
 
@@ -58,6 +68,12 @@ function classifyRejection(error: unknown, renewal: boolean): Classified {
   const fallback = renewal ? 'renewal_failed' : 'mint_failed';
 
   if (status === 401) return same('partner_session_expired');
+  if (status === 403 && code === SCOPE_NOT_ENTITLED) {
+    return {
+      ...same(fallback),
+      loadError: { type: 'invalid_request_error', message: SCOPE_NOT_ENTITLED_MESSAGE },
+    };
+  }
   if (status !== 409) return same(fallback);
 
   // A route that forwards only the status, as every route did before the code
@@ -102,15 +118,21 @@ const RETRYABLE: Record<DoolaAuthError['type'], boolean> = {
 
 /**
  * `retryable` follows what the partner is told, and `reason` what the frame
- * shows, so a terminal failure shown with neutral copy stays terminal.
+ * shows, so a terminal failure shown with neutral copy stays terminal. A
+ * failure with a load error is terminal whatever its type.
  */
-export function tokenError(
-  error: DoolaAuthError,
-  shown: DoolaAuthError['type'],
-): Extract<LoaderMessage, { type: 'token-error' }> {
+export function tokenError({
+  error,
+  shown,
+  loadError,
+}: AuthFailure): Extract<LoaderMessage, { type: 'token-error' }> {
   return {
     type: 'token-error',
-    payload: { reason: shown, message: error.message, retryable: RETRYABLE[error.type] },
+    payload: {
+      reason: shown,
+      message: error.message,
+      retryable: !loadError && RETRYABLE[error.type],
+    },
   };
 }
 
@@ -274,9 +296,9 @@ export class SessionManager {
     } catch (error: unknown) {
       if (this.stopped) throw error;
 
-      const { type, shown } = classifyRejection(error, renewal);
+      const { type, shown, loadError } = classifyRejection(error, renewal);
       const message = error instanceof Error ? error.message : String(error);
-      this.onAuthError({ error: { type, message }, shown });
+      this.onAuthError({ error: { type, message }, shown, loadError });
 
       throw error;
     } finally {

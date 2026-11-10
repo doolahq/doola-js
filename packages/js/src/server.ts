@@ -32,6 +32,13 @@ export interface DoolaCustomer {
 }
 
 /**
+ * What a customer session may reach, one scope per product: `sdk:formation`
+ * for `create()`, `sdk:tax` for `create({ product: 'tax' })`. `sdk:tax` needs
+ * the tax feature on your account; without it doola refuses the mint.
+ */
+export type DoolaScope = 'sdk:formation' | 'sdk:tax';
+
+/**
  * What the session route sends the browser: the status, and the JSON body when
  * there is one. `body` is set only with status 200, and carries exactly what
  * `fetchAccessToken` resolves with. A failure carries `code` instead, when
@@ -45,10 +52,11 @@ export interface CustomerSessionResult {
   body: { accessToken: string; expiresIn: number } | null;
 
   /**
-   * doola's error code on a 409, such as `E_EMAIL_IN_USE`. Send it as the
-   * JSON body `{ code }` with `status`, so `fetchAccessToken` can reject with
-   * it: doola answers 409 for more than one reason, and the loader tells them
-   * apart by this code. Unlike `failure`, it is safe for the browser.
+   * doola's error code on a 409, such as `E_EMAIL_IN_USE`, or on the 403
+   * `E_SCOPE_NOT_ENTITLED`. Send it as the JSON body `{ code }` with `status`,
+   * so `fetchAccessToken` can reject with it: the loader tells the 409s apart
+   * by this code, and stops retrying a scope your account does not hold.
+   * Unlike `failure`, it is safe for the browser.
    */
   code?: string;
 
@@ -90,6 +98,14 @@ export interface CustomerSessionOptions {
 
   /** The signed-in customer, from your own auth. */
   customer: DoolaCustomer;
+
+  /**
+   * The products this session may mount. List every product the page
+   * creates: one session serves every component, so a session without
+   * `sdk:formation` makes a formation component refuse. Omitted, the field
+   * is not sent and doola mints formation only.
+   */
+  scopes?: readonly DoolaScope[] | undefined;
 }
 
 /** For {@link createSessionHandler}. */
@@ -115,6 +131,13 @@ export interface SessionHandlerOptions {
    * rejects the request rather than going unhandled.
    */
   onFailure?: ((failure: CustomerSessionFailure) => void | Promise<void>) | undefined;
+
+  /**
+   * As in {@link CustomerSessionOptions.scopes}, for every request this route
+   * serves. To offer tax to only some of your customers, call
+   * {@link createCustomerSession} per request instead.
+   */
+  scopes?: readonly DoolaScope[] | undefined;
 }
 
 interface Credentials {
@@ -157,7 +180,10 @@ function credentials(apiKey: string | undefined): Credentials {
 
 // Picked rather than spread: a user record passed as the customer must not
 // forward the rest of its fields to doola.
-function mintRequestBody(customer: DoolaCustomer): string {
+function mintRequestBody(
+  customer: DoolaCustomer,
+  scopes: readonly DoolaScope[] | undefined,
+): string {
   const { email, externalCustomerId, firstName, lastName, countryOfResidence, phoneNumber } =
     customer;
 
@@ -168,6 +194,7 @@ function mintRequestBody(customer: DoolaCustomer): string {
     lastName,
     countryOfResidence,
     phoneNumber,
+    scopes,
   });
 }
 
@@ -209,12 +236,16 @@ function failed(status: number, failure: CustomerSessionFailure): CustomerSessio
   return { status, body: null, failure };
 }
 
-// Only a 409 is about the customer. Every other code (the 401 and 403s about
-// the key or tenant, the 400s about the request) is the partner's to log.
+const SCOPE_NOT_ENTITLED = 'E_SCOPE_NOT_ENTITLED';
+
+// A 409 is about the customer, and the scope 403 decides whether the founder
+// may retry. Every other code (the 401 and other 403s about the key or tenant,
+// the 400s about the request) is the partner's to log.
 function refused(status: number, failure: CustomerSessionFailure): CustomerSessionResult {
   const { doolaCode } = failure;
+  const forwarded = status === 409 || (status === 403 && doolaCode === SCOPE_NOT_ENTITLED);
 
-  return status === 409 && doolaCode
+  return forwarded && doolaCode
     ? { ...failed(status, failure), code: doolaCode }
     : failed(status, failure);
 }
@@ -222,6 +253,7 @@ function refused(status: number, failure: CustomerSessionFailure): CustomerSessi
 async function mint(
   { apiKey, apiOrigin }: Credentials,
   customer: DoolaCustomer,
+  scopes: readonly DoolaScope[] | undefined,
 ): Promise<CustomerSessionResult> {
   const signal = AbortSignal.timeout(MINT_TIMEOUT_MS);
   let response: Response;
@@ -230,7 +262,7 @@ async function mint(
     response = await fetch(`${apiOrigin}/v1/partner/customer-sessions`, {
       method: 'POST',
       headers: { authorization: apiKey, 'content-type': 'application/json' },
-      body: mintRequestBody(customer),
+      body: mintRequestBody(customer, scopes),
       signal,
     });
   } catch {
@@ -281,7 +313,7 @@ function respond({ status, body, code }: CustomerSessionResult): Response {
 /**
  * Mints a session for one customer and returns what the session route should
  * send, for Express, Fastify or your own routing. Send `status`, with `body` as
- * JSON when it is not null, or `{ code }` as JSON when `code` is set (a 409).
+ * JSON when it is not null, or `{ code }` as JSON when `code` is set.
  * {@link createSessionHandler} does this for a web-standard route.
  *
  * Never rejects for a doola or network failure: those resolve to a status, with
@@ -291,7 +323,7 @@ function respond({ status, body, code }: CustomerSessionResult): Response {
 export async function createCustomerSession(
   options: CustomerSessionOptions,
 ): Promise<CustomerSessionResult> {
-  return mint(credentials(options.apiKey), options.customer);
+  return mint(credentials(options.apiKey), options.customer, options.scopes);
 }
 
 /**
@@ -306,7 +338,7 @@ export async function createCustomerSession(
 export function createSessionHandler(
   options: SessionHandlerOptions,
 ): (request: Request) => Promise<Response> {
-  const { apiKey, getCustomer, onFailure } = options;
+  const { apiKey, getCustomer, onFailure, scopes } = options;
   const checked = apiKey ? credentials(apiKey) : undefined;
 
   return async (request) => {
@@ -315,7 +347,7 @@ export function createSessionHandler(
 
     if (!customer) return respond({ status: 401, body: null });
 
-    const result = await mint(resolved, customer);
+    const result = await mint(resolved, customer, scopes);
 
     if (result.failure) await onFailure?.(result.failure);
 

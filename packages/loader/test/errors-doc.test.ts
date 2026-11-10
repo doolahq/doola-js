@@ -3,10 +3,10 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { LOAD_FAILURE_MESSAGES } from '../src/policy';
+import { LOAD_FAILURE_MESSAGES, SCOPE_NOT_ENTITLED_MESSAGE } from '../src/policy';
 
 /**
- * `docs/errors.md` is contract surface (CONTRIBUTING), and these three
+ * `docs/errors.md` is contract surface (CONTRIBUTING), and these
  * sentences are the only part of a loader-raised failure a partner ever reads —
  * the string that reaches a support ticket and the string they grep the docs
  * for. A copy edit here that left the document behind would be invisible: the
@@ -19,10 +19,10 @@ import { LOAD_FAILURE_MESSAGES } from '../src/policy';
 const doc = readFileSync(resolve(__dirname, '../../../docs/errors.md'), 'utf8');
 
 describe('docs/errors.md', () => {
-  it.each(Object.entries(LOAD_FAILURE_MESSAGES))(
-    'quotes the %s message verbatim',
-    (_cause, message) => {
-      expect(doc).toContain(message);
-    },
-  );
+  it.each([
+    ...Object.entries(LOAD_FAILURE_MESSAGES),
+    ['scopeNotEntitled', SCOPE_NOT_ENTITLED_MESSAGE],
+  ])('quotes the %s message verbatim', (_cause, message) => {
+    expect(doc).toContain(message);
+  });
 });
