@@ -39,6 +39,45 @@ export interface DoolaCustomer {
 export type DoolaScope = 'sdk:formation' | 'sdk:tax';
 
 /**
+ * A service the SDK sells on top of the formation, by its price name.
+ * `EinCreation` is an EIN on its own. `VariantEinExpedited` is the extra on top
+ * of a Standard EIN, the price of `variant: "Expedite"` on `EinCreation` in the
+ * Partner API. EIN in the formation flow is part of the formation, so it needs
+ * no price.
+ */
+export type DoolaPricedService = 'EinCreation' | 'VariantEinExpedited';
+
+/**
+ * Your prices for one session, shown in the SDK in place of the prices set in
+ * the Partner Portal. If you send prices, they are the complete price list for
+ * that customer: a service you leave out is not offered. If you send none, the
+ * portal's prices apply. A list that prices nothing counts as none, so there
+ * is no way to offer none of the priced services here: to offer none, turn
+ * them off in the Partner Portal. doola never charges these: you do, on your
+ * own page.
+ *
+ * The helpers send them as they are, every name in `pricesInCents` included,
+ * and doola checks them: an unknown name or currency, or an amount that is
+ * negative or not a whole number, is refused with a 400 `E_VALIDATION_FAILED`.
+ */
+export interface DoolaServicePrices {
+  /**
+   * The ISO 4217 code of the prices in `pricesInCents`, such as `USD`, `MXN`
+   * or `CLP`. It applies to those prices only.
+   */
+  currency: string;
+
+  /**
+   * Per service, a whole number of at least 0 in the currency's ISO 4217
+   * minor unit: 2 decimals for USD, so USD 149.00 is `14900`; none for CLP,
+   * so CLP 140,000 is `140000`; 3 for KWD, so KWD 1.500 is `1500`. Empty
+   * means no prices, so the portal's apply, and a name whose value is
+   * `undefined` is left out.
+   */
+  pricesInCents: Readonly<Partial<Record<DoolaPricedService, number>>>;
+}
+
+/**
  * What the session route sends the browser: the status, and the JSON body when
  * there is one. `body` is set only with status 200, and carries exactly what
  * `fetchAccessToken` resolves with. A failure carries `code` instead, when
@@ -85,6 +124,14 @@ export interface CustomerSessionFailure {
 
   /** `error.code` from doola's error envelope, such as `E_VALIDATION_FAILED`. */
   doolaCode?: string;
+
+  /**
+   * `error.fields` from doola's error envelope, set only when doola sends it,
+   * as on a 400 `E_VALIDATION_FAILED`: each refused field by its path, such as
+   * `servicePrices.pricesInCents.EinExpedited`, with its own `code` when doola
+   * gives one, and a `message`. For your logs only: never send it to the browser.
+   */
+  doolaFields?: Readonly<Record<string, { code?: string; message?: string }>>;
 }
 
 /** For {@link createCustomerSession}. */
@@ -106,6 +153,14 @@ export interface CustomerSessionOptions {
    * is not sent and doola mints formation only.
    */
   scopes?: readonly DoolaScope[] | undefined;
+
+  /**
+   * This customer's prices, in place of the Partner Portal's for this
+   * session. Omitted, the field is not sent and the portal's prices apply.
+   * Send them on every call: each renewal is a new session, and one without
+   * prices falls back to the portal's.
+   */
+  servicePrices?: DoolaServicePrices | undefined;
 }
 
 /** For {@link createSessionHandler}. */
@@ -138,6 +193,15 @@ export interface SessionHandlerOptions {
    * {@link createCustomerSession} per request instead.
    */
   scopes?: readonly DoolaScope[] | undefined;
+
+  /**
+   * As in {@link CustomerSessionOptions.servicePrices}, sent for every
+   * customer of this route: one price list kept in your code. They are read
+   * once, when the handler is created, so a later change to the object is
+   * not sent. For prices per customer, or prices that change while the route
+   * runs, call {@link createCustomerSession} per request instead.
+   */
+  servicePrices?: DoolaServicePrices | undefined;
 }
 
 interface Credentials {
@@ -178,11 +242,30 @@ function credentials(apiKey: string | undefined): Credentials {
   return { apiKey, apiOrigin: match[1] };
 }
 
+// What a mint sends besides the customer. An undefined field is left out of
+// the body.
+interface SessionFields {
+  scopes: readonly DoolaScope[] | undefined;
+  servicePrices: DoolaServicePrices | undefined;
+}
+
+// The top level is picked like the customer, and pricesInCents is copied, so a
+// handler keeps the prices it was created with. Its names and amounts pass as
+// they are: doola refuses an unknown name, so a typo fails loudly instead of
+// being dropped here and hiding a service.
+function pickPrices(prices: DoolaServicePrices | undefined): DoolaServicePrices | undefined {
+  if (!prices) return undefined;
+
+  const { currency, pricesInCents } = prices;
+
+  return { currency, pricesInCents: { ...pricesInCents } };
+}
+
 // Picked rather than spread: a user record passed as the customer must not
 // forward the rest of its fields to doola.
 function mintRequestBody(
   customer: DoolaCustomer,
-  scopes: readonly DoolaScope[] | undefined,
+  { scopes, servicePrices }: SessionFields,
 ): string {
   const { email, externalCustomerId, firstName, lastName, countryOfResidence, phoneNumber } =
     customer;
@@ -195,6 +278,7 @@ function mintRequestBody(
     countryOfResidence,
     phoneNumber,
     scopes,
+    servicePrices,
   });
 }
 
@@ -232,6 +316,28 @@ function doolaCodeFrom({ error }: Record<string, unknown>): { doolaCode?: string
   return isRecord(error) && typeof error.code === 'string' ? { doolaCode: error.code } : {};
 }
 
+// Only code and message, and only when they are strings, so the partner's log
+// gets doola's documented field error and nothing else the envelope may carry.
+function doolaFieldsFrom({
+  error,
+}: Record<string, unknown>): Pick<CustomerSessionFailure, 'doolaFields'> {
+  if (!isRecord(error) || !isRecord(error.fields)) return {};
+
+  const doolaFields: Record<string, { code?: string; message?: string }> = {};
+
+  for (const [field, value] of Object.entries(error.fields)) {
+    if (!isRecord(value)) continue;
+
+    const { code, message } = value;
+    doolaFields[field] = {
+      ...(typeof code === 'string' ? { code } : {}),
+      ...(typeof message === 'string' ? { message } : {}),
+    };
+  }
+
+  return { doolaFields };
+}
+
 function failed(status: number, failure: CustomerSessionFailure): CustomerSessionResult {
   return { status, body: null, failure };
 }
@@ -253,8 +359,11 @@ function refused(status: number, failure: CustomerSessionFailure): CustomerSessi
 async function mint(
   { apiKey, apiOrigin }: Credentials,
   customer: DoolaCustomer,
-  scopes: readonly DoolaScope[] | undefined,
+  fields: SessionFields,
 ): Promise<CustomerSessionResult> {
+  // Outside the try: prices JSON cannot encode, such as a bigint, are a bug in
+  // the caller, not doola being unreachable, and no request was sent.
+  const body = mintRequestBody(customer, fields);
   const signal = AbortSignal.timeout(MINT_TIMEOUT_MS);
   let response: Response;
 
@@ -262,7 +371,7 @@ async function mint(
     response = await fetch(`${apiOrigin}/v1/partner/customer-sessions`, {
       method: 'POST',
       headers: { authorization: apiKey, 'content-type': 'application/json' },
-      body: mintRequestBody(customer, scopes),
+      body,
       signal,
     });
   } catch {
@@ -275,7 +384,7 @@ async function mint(
   const doolaStatus = response.status;
 
   if (!response.ok) {
-    const detail = { doolaStatus, ...doolaCodeFrom(envelope) };
+    const detail = { doolaStatus, ...doolaCodeFrom(envelope), ...doolaFieldsFrom(envelope) };
 
     // doola's 401 means the key or tenant is wrong, not the customer's session.
     // The loader reads any 401 as partner_session_expired, so passing it on would
@@ -287,9 +396,9 @@ async function mint(
     return refused(doolaStatus, { reason: 'doola_error', ...detail });
   }
 
-  const body = sessionFrom(envelope);
+  const session = sessionFrom(envelope);
 
-  if (body) return { status: 200, body };
+  if (session) return { status: 200, body: session };
 
   // The timeout also covers the body, and readEnvelope swallows the abort, so a
   // session cut off mid-body is doola being slow, not doola sending garbage.
@@ -318,12 +427,18 @@ function respond({ status, body, code }: CustomerSessionResult): Response {
  *
  * Never rejects for a doola or network failure: those resolve to a status, with
  * `failure` saying why. It rejects only for a missing or invalid `apiKey`, which
- * is checked on every call, so let your framework's error handling see it.
+ * is checked on every call, and for prices JSON cannot encode, such as a
+ * bigint, so let your framework's error handling see it.
  */
 export async function createCustomerSession(
   options: CustomerSessionOptions,
 ): Promise<CustomerSessionResult> {
-  return mint(credentials(options.apiKey), options.customer, options.scopes);
+  const { apiKey, customer, scopes, servicePrices } = options;
+
+  return mint(credentials(apiKey), customer, {
+    scopes,
+    servicePrices: pickPrices(servicePrices),
+  });
 }
 
 /**
@@ -332,14 +447,17 @@ export async function createCustomerSession(
  * Workers and Node 18 or later. Throws at once for a key that is present but
  * invalid, such as a publishable `pk_` key.
  *
- * A missing key, and an error from `getCustomer` or `onFailure`, reject the
- * request, to your framework's own error handling.
+ * A missing key, prices JSON cannot encode, and an error from `getCustomer` or
+ * `onFailure`, reject the request, to your framework's own error handling.
  */
 export function createSessionHandler(
   options: SessionHandlerOptions,
 ): (request: Request) => Promise<Response> {
   const { apiKey, getCustomer, onFailure } = options;
-  const scopes = options.scopes && [...options.scopes];
+  const fields: SessionFields = {
+    scopes: options.scopes && [...options.scopes],
+    servicePrices: pickPrices(options.servicePrices),
+  };
   const checked = apiKey ? credentials(apiKey) : undefined;
 
   return async (request) => {
@@ -348,7 +466,7 @@ export function createSessionHandler(
 
     if (!customer) return respond({ status: 401, body: null });
 
-    const result = await mint(resolved, customer, scopes);
+    const result = await mint(resolved, customer, fields);
 
     if (result.failure) await onFailure?.(result.failure);
 

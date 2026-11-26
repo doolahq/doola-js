@@ -13,6 +13,10 @@ export function createSessionHandler(options: SessionHandlerOptions): (request: 
 // @public
 export interface CustomerSessionFailure {
     doolaCode?: string;
+    doolaFields?: Readonly<Record<string, {
+        code?: string;
+        message?: string;
+    }>>;
     doolaStatus?: number;
     reason: 'doola_unauthorized' | 'doola_error' | 'doola_unreachable' | 'invalid_response';
 }
@@ -22,6 +26,7 @@ export interface CustomerSessionOptions {
     apiKey: string | undefined;
     customer: DoolaCustomer;
     scopes?: readonly DoolaScope[] | undefined;
+    servicePrices?: DoolaServicePrices | undefined;
 }
 
 // @public
@@ -46,7 +51,16 @@ export interface DoolaCustomer {
 }
 
 // @public
+export type DoolaPricedService = 'EinCreation' | 'VariantEinExpedited';
+
+// @public
 export type DoolaScope = 'sdk:formation' | 'sdk:tax';
+
+// @public
+export interface DoolaServicePrices {
+    currency: string;
+    pricesInCents: Readonly<Partial<Record<DoolaPricedService, number>>>;
+}
 
 // @public
 export interface SessionHandlerOptions {
@@ -54,6 +68,7 @@ export interface SessionHandlerOptions {
     getCustomer: (request: Request) => DoolaCustomer | null | Promise<DoolaCustomer | null>;
     onFailure?: ((failure: CustomerSessionFailure) => void | Promise<void>) | undefined;
     scopes?: readonly DoolaScope[] | undefined;
+    servicePrices?: DoolaServicePrices | undefined;
 }
 
 // (No @packageDocumentation comment for this package)

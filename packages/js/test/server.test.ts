@@ -7,6 +7,7 @@ import {
   type CustomerSessionResult,
   type DoolaCustomer,
   type DoolaScope,
+  type DoolaServicePrices,
   type SessionHandlerOptions,
 } from '../src/server';
 
@@ -18,6 +19,11 @@ const CUSTOMER: DoolaCustomer = { email: 'founder@example.com', externalCustomer
 const MINTED = {
   payload: { accessToken: 'cs_live_abc', expiresAt: '2026-09-25T10:10:00Z', expiresIn: 600 },
   error: null,
+};
+
+const PRICES: DoolaServicePrices = {
+  currency: 'USD',
+  pricesInCents: { EinCreation: 9900, VariantEinExpedited: 14900 },
 };
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -42,8 +48,9 @@ function handler(
   apiKey: string | undefined = LIVE_KEY,
   onFailure?: SessionHandlerOptions['onFailure'],
   scopes?: SessionHandlerOptions['scopes'],
+  servicePrices?: SessionHandlerOptions['servicePrices'],
 ) {
-  return createSessionHandler({ apiKey, getCustomer, onFailure, scopes });
+  return createSessionHandler({ apiKey, getCustomer, onFailure, scopes, servicePrices });
 }
 
 function call(route = handler()) {
@@ -156,6 +163,7 @@ describe('createSessionHandler', () => {
       await call(route);
       await call(route);
 
+      expect(fetchMock).toHaveBeenCalledTimes(2);
       for (const [, init] of fetchMock.mock.calls) {
         expect(JSON.parse(String(init?.body))).toEqual({ ...CUSTOMER, scopes });
       }
@@ -170,6 +178,54 @@ describe('createSessionHandler', () => {
     await call(route);
 
     expect(sentRequest().body).toEqual({ ...CUSTOMER, scopes: ['sdk:formation'] });
+  });
+
+  it('sends servicePrices for every request when set', async () => {
+    const route = handler(undefined, undefined, undefined, undefined, PRICES);
+
+    await call(route);
+    await call(route);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(JSON.parse(String(init?.body))).toEqual({ ...CUSTOMER, servicePrices: PRICES });
+    }
+  });
+
+  it('keeps the prices it was created with when the caller later changes them', async () => {
+    const prices = { currency: 'USD', pricesInCents: { EinCreation: 9900 } };
+    const route = handler(undefined, undefined, undefined, undefined, prices);
+    prices.currency = 'EUR';
+    prices.pricesInCents.EinCreation = 1;
+
+    await call(route);
+
+    expect(sentRequest().body).toEqual({
+      ...CUSTOMER,
+      servicePrices: { currency: 'USD', pricesInCents: { EinCreation: 9900 } },
+    });
+  });
+
+  it("gives doola's field errors to onFailure and never to the browser", async () => {
+    const fields = { 'servicePrices.currency': { code: 'E_VALIDATION_FAILED', message: 'no' } };
+    fetchMock.mockResolvedValue(
+      Response.json(
+        { payload: null, error: { code: 'E_VALIDATION_FAILED', fields } },
+        { status: 400 },
+      ),
+    );
+    const onFailure = vi.fn();
+
+    const response = await call(handler(undefined, undefined, onFailure, undefined, PRICES));
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe('');
+    expect(onFailure).toHaveBeenCalledWith({
+      reason: 'doola_error',
+      doolaStatus: 400,
+      doolaCode: 'E_VALIDATION_FAILED',
+      doolaFields: fields,
+    });
   });
 
   it('forwards the optional profile fields and nothing else from the customer', async () => {
@@ -478,6 +534,130 @@ describe('createCustomerSession', () => {
     await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, scopes: ['sdk:tax'] });
 
     expect(sentRequest().body).toEqual({ ...CUSTOMER, scopes: ['sdk:tax'] });
+  });
+
+  it('sends servicePrices when set, with scopes', async () => {
+    await createCustomerSession({
+      apiKey: LIVE_KEY,
+      customer: CUSTOMER,
+      scopes: ['sdk:formation'],
+      servicePrices: PRICES,
+    });
+
+    expect(sentRequest().body).toEqual({
+      ...CUSTOMER,
+      scopes: ['sdk:formation'],
+      servicePrices: PRICES,
+    });
+  });
+
+  it('sends empty prices as they are, which doola reads as none', async () => {
+    const servicePrices = { currency: 'USD', pricesInCents: {} };
+
+    await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, servicePrices });
+
+    expect(sentRequest().body).toEqual({ ...CUSTOMER, servicePrices });
+  });
+
+  it('forwards currency and pricesInCents and nothing else at the top of the prices', async () => {
+    const servicePrices = { ...PRICES, note: 'internal' };
+
+    await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, servicePrices });
+
+    expect(sentRequest().body).toEqual({ ...CUSTOMER, servicePrices: PRICES });
+  });
+
+  it("carries doola's field errors to the failure, code and message only", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        {
+          payload: null,
+          error: {
+            code: 'E_VALIDATION_FAILED',
+            message: 'one or more fields are invalid',
+            requestId: 'r1',
+            fields: {
+              'servicePrices.pricesInCents.EinExpedited': {
+                code: 'E_VALIDATION_FAILED',
+                message: 'unknown service',
+                extra: 'x',
+              },
+              'servicePrices.currency': { message: 'unknown currency' },
+              phoneNumber: 'not an object',
+            },
+          },
+        },
+        { status: 400 },
+      ),
+    );
+
+    const result = await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER });
+
+    expect(result).toEqual({
+      status: 400,
+      body: null,
+      failure: {
+        reason: 'doola_error',
+        doolaStatus: 400,
+        doolaCode: 'E_VALIDATION_FAILED',
+        doolaFields: {
+          'servicePrices.pricesInCents.EinExpedited': {
+            code: 'E_VALIDATION_FAILED',
+            message: 'unknown service',
+          },
+          'servicePrices.currency': { message: 'unknown currency' },
+        },
+      },
+    });
+  });
+
+  it("leaves the prices to doola's checks, and reports its 400 as a failure without a code", async () => {
+    const servicePrices = { currency: 'XYZ', pricesInCents: { EinCreation: -1.5 } };
+    fetchMock.mockResolvedValue(doolaError(400, 'E_VALIDATION_FAILED'));
+
+    await expect(
+      createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, servicePrices }),
+    ).resolves.toEqual({
+      status: 400,
+      body: null,
+      failure: { reason: 'doola_error', doolaStatus: 400, doolaCode: 'E_VALIDATION_FAILED' },
+    });
+    expect(sentRequest().body).toEqual({ ...CUSTOMER, servicePrices });
+  });
+
+  it('sends every name in pricesInCents, so doola refuses a typo instead of a service going missing', async () => {
+    const pricesInCents: Record<string, number> = { EinCreation: 9900, EinExpedited: 14900 };
+
+    await createCustomerSession({
+      apiKey: LIVE_KEY,
+      customer: CUSTOMER,
+      servicePrices: { currency: 'USD', pricesInCents },
+    });
+
+    expect(sentRequest().body).toEqual({
+      ...CUSTOMER,
+      servicePrices: { currency: 'USD', pricesInCents },
+    });
+  });
+
+  it('rejects prices JSON cannot encode without calling doola, rather than reporting an outage', async () => {
+    const servicePrices = {
+      currency: 'USD',
+      pricesInCents: { EinCreation: 9900n },
+    } as unknown as DoolaServicePrices;
+
+    await expect(
+      createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, servicePrices }),
+    ).rejects.toThrow(TypeError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('types the price names, so a typo in an inline literal fails to compile', () => {
+    // Only an inline literal: a map held in a variable first, or typed
+    // Record<string, number>, compiles, and doola refuses the name instead.
+    // @ts-expect-error EinExpedited is not a service name.
+    const typo: DoolaServicePrices = { currency: 'USD', pricesInCents: { EinExpedited: 100 } };
+    expect(typo).toBeDefined();
   });
 
   it("carries the code of doola's scope 403, so the loader stops the retry", async () => {

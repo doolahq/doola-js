@@ -97,6 +97,46 @@ The token acts as that one customer and expires in minutes. The loader calls you
 renew it, so a doola session never outlives your own login. Protect the route like any other
 authenticated `POST`, including your CSRF protection.
 
+**Prices, optional.** The SDK shows your prices next to the services it offers, and you charge for
+them on your own page. Set them in the Partner Portal, and your code changes nothing. Or send them
+from your server with `servicePrices`, in place of the portal's for that session. **If you send
+prices, they are the complete price list for that customer. If you send none, the portal's prices
+apply.** A service you leave out of the prices you send is not offered to that customer. A list
+that prices nothing counts as none, so the portal's prices apply: there is no way to offer none of
+the priced services through `servicePrices`. To offer none, turn them off in the Partner Portal.
+
+<!-- example: session-prices -->
+
+```ts
+import { createSessionHandler } from '@doola/js/server';
+
+export const POST = createSessionHandler({
+  apiKey: process.env.DOOLA_API_KEY,
+  getCustomer: async (request) => {
+    const user = await getSignedInUser(request);
+    return user ? { email: user.email, externalCustomerId: user.id } : null;
+  },
+  // Optional. Read once, when the route is created, and sent for every customer.
+  servicePrices: {
+    currency: 'MXN', // ISO 4217 code of the prices below
+    // Whole amounts in the currency's ISO 4217 minor unit: 99900 is MXN 999.00.
+    pricesInCents: { EinCreation: 99900, VariantEinExpedited: 149900 },
+  },
+});
+```
+
+`createSessionHandler` sends the same prices for every customer, which suits one price list kept in
+your code. For prices per customer, or prices that change while the route runs, call
+`createCustomerSession({ apiKey, customer, servicePrices })` in your own route and choose them per
+request. `EinCreation` is an EIN on its own and `VariantEinExpedited` the extra on top of a Standard
+EIN. `currency` applies to these prices only, and each amount is a whole number in the currency's
+ISO 4217 minor unit: 2 decimals for USD, none for CLP, 3 for KWD.
+
+The helpers send the prices as they are, and doola checks them: an unknown name or currency, or an
+amount that is negative or not a whole number, is refused with a 400 `E_VALIDATION_FAILED`. Then
+every mint of that route fails: `onFailure` gets the 400, with `doolaFields` naming the refused
+field, and the founder sees the session error with Try again. Check your prices in test mode first.
+
 Express, Fastify and other languages: [Create sessions](https://docs.doola.com/sdk/sessions).
 
 ## 2. Mount in the browser
@@ -158,7 +198,8 @@ checkout starts:
 3. **Price it on your server** from the company's `state`, `entityType` and attached `services`,
    plus the state fee from
    [List state filing fees](https://docs.doola.com/api/api-reference/reference-data/list-state-filing-fees).
-   Never read a price from the browser.
+   Never read a price from the browser. Charge services at the prices the session showed: yours when
+   you sent `servicePrices`, otherwise the ones set in the Partner Portal.
 4. **Charge, then confirm** with
    [Confirm payment](https://docs.doola.com/api/api-reference/companies/confirm-payment-for-a-draft-formation).
    Nothing is filed until you do:
