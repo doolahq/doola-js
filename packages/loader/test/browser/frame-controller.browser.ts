@@ -7,6 +7,7 @@ import {
   PLACEHOLDER_FRAME_HEIGHT_PX,
   READY_AFTER_LOAD_MS,
   SCOPE_NOT_ENTITLED_MESSAGE,
+  VALIDATION_FAILED_MESSAGE,
 } from '../../src/policy';
 import { APP_PAGE, navigatedFrame, startHarness, type Harness } from './harness';
 
@@ -586,6 +587,38 @@ test('a mint refused for its scope is terminal, and reported as a load error too
   // handler hears the incident twice, which errors.md allows.
   await expect.poll(async () => (await eventsOf(page, 'onAuthError')).length).toBe(2);
   await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(2);
+});
+
+test('a mint doola refused for a field is terminal, and reported as a load error too', async ({
+  page,
+}) => {
+  await mount(page, { mintRejection: { status: 400, code: 'E_VALIDATION_FAILED' } });
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBeGreaterThan(0);
+
+  const tokenErrors = (await received(frame)).filter((m) => m.data.type === 'token-error');
+  expect(tokenErrors[0]?.data.payload).toMatchObject({ reason: 'mint_failed', retryable: false });
+  expect((await eventsOf(page, 'onAuthError'))[0]?.error).toMatchObject({ type: 'mint_failed' });
+  expect((await eventsOf(page, 'onLoadError'))[0]?.error).toMatchObject({
+    type: 'invalid_request_error',
+    message: VALIDATION_FAILED_MESSAGE,
+  });
+});
+
+test('a 400 without a code, from a route on an older @doola/js, stays a retryable mint_failed', async ({
+  page,
+}) => {
+  await mount(page, { mintRejection: { status: 400 } });
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBeGreaterThan(0);
+
+  const [tokenError] = (await received(frame)).filter((m) => m.data.type === 'token-error');
+  expect(tokenError?.data.payload).toMatchObject({ reason: 'mint_failed', retryable: true });
+  expect(await eventsOf(page, 'onLoadError')).toHaveLength(0);
 });
 
 test('any other 403 stays a retryable mint_failed with no load error', async ({ page }) => {

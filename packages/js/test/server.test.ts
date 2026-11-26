@@ -219,7 +219,7 @@ describe('createSessionHandler', () => {
     const response = await call(handler(undefined, undefined, onFailure, undefined, PRICES));
 
     expect(response.status).toBe(400);
-    expect(await response.text()).toBe('');
+    expect(await response.json()).toStrictEqual({ code: 'E_VALIDATION_FAILED' });
     expect(onFailure).toHaveBeenCalledWith({
       reason: 'doola_error',
       doolaStatus: 400,
@@ -368,9 +368,15 @@ describe('createSessionHandler', () => {
       '',
     ],
     [
-      "doola's 400",
+      "doola's 400 for a field it refused",
       () => fetchMock.mockResolvedValue(doolaError(400, 'E_VALIDATION_FAILED')),
       { reason: 'doola_error', doolaStatus: 400, doolaCode: 'E_VALIDATION_FAILED' },
+      '{"code":"E_VALIDATION_FAILED"}',
+    ],
+    [
+      "doola's other 400s",
+      () => fetchMock.mockResolvedValue(doolaError(400, 'E_MALFORMED_JSON')),
+      { reason: 'doola_error', doolaStatus: 400, doolaCode: 'E_MALFORMED_JSON' },
       '',
     ],
     [
@@ -410,7 +416,7 @@ describe('createSessionHandler', () => {
       '',
     ],
   ])(
-    'tells onFailure about %s, and the browser only the status, and the code of a 409 or the scope 403',
+    'tells onFailure about %s, and the browser only the status, and the code of a 409, the scope 403 or the validation 400',
     async (_, arrange, failure, browserBody) => {
       arrange();
       const onFailure = vi.fn();
@@ -596,6 +602,7 @@ describe('createCustomerSession', () => {
     expect(result).toEqual({
       status: 400,
       body: null,
+      code: 'E_VALIDATION_FAILED',
       failure: {
         reason: 'doola_error',
         doolaStatus: 400,
@@ -611,7 +618,7 @@ describe('createCustomerSession', () => {
     });
   });
 
-  it("leaves the prices to doola's checks, and reports its 400 as a failure without a code", async () => {
+  it("leaves the prices to doola's checks, and carries the code of its validation 400", async () => {
     const servicePrices = { currency: 'XYZ', pricesInCents: { EinCreation: -1.5 } };
     fetchMock.mockResolvedValue(doolaError(400, 'E_VALIDATION_FAILED'));
 
@@ -620,9 +627,20 @@ describe('createCustomerSession', () => {
     ).resolves.toEqual({
       status: 400,
       body: null,
+      code: 'E_VALIDATION_FAILED',
       failure: { reason: 'doola_error', doolaStatus: 400, doolaCode: 'E_VALIDATION_FAILED' },
     });
     expect(sentRequest().body).toEqual({ ...CUSTOMER, servicePrices });
+  });
+
+  it("never carries the code of doola's other 400s", async () => {
+    fetchMock.mockResolvedValue(doolaError(400, 'E_MALFORMED_JSON'));
+
+    await expect(createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER })).resolves.toEqual({
+      status: 400,
+      body: null,
+      failure: { reason: 'doola_error', doolaStatus: 400, doolaCode: 'E_MALFORMED_JSON' },
+    });
   });
 
   it('sends every name in pricesInCents, so doola refuses a typo instead of a service going missing', async () => {

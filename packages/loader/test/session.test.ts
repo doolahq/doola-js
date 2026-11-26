@@ -2,7 +2,7 @@ import { createCustomerSession } from '@doola/js/server';
 import { parseLoaderMessage, PROTOCOL_VERSION } from '@doola/sdk-protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SCOPE_NOT_ENTITLED_MESSAGE } from '../src/policy';
+import { SCOPE_NOT_ENTITLED_MESSAGE, VALIDATION_FAILED_MESSAGE } from '../src/policy';
 import { SessionManager, tokenError } from '../src/session';
 
 const session = (expiresIn: number) => ({
@@ -17,6 +17,7 @@ const failure = (type: string, shown = type, loadError?: unknown) =>
   expect.objectContaining({ error: expect.objectContaining({ type }), shown, loadError });
 
 const SCOPE_LOAD_ERROR = { type: 'invalid_request_error', message: SCOPE_NOT_ENTITLED_MESSAGE };
+const VALIDATION_LOAD_ERROR = { type: 'invalid_request_error', message: VALIDATION_FAILED_MESSAGE };
 
 describe('SessionManager', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -241,10 +242,46 @@ describe('SessionManager', () => {
     expect(onAuthError).toHaveBeenCalledWith(failure('renewal_failed'));
   });
 
+  it('gives a first-mint 400 E_VALIDATION_FAILED a load error, and makes it terminal', async () => {
+    const onAuthError = vi.fn();
+    const fetch = vi.fn().mockRejectedValue({ status: 400, code: 'E_VALIDATION_FAILED' });
+    const manager = new SessionManager(fetch, onAuthError, vi.fn());
+
+    await expect(manager.current()).rejects.toBeDefined();
+
+    expect(onAuthError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ type: 'mint_failed' }),
+        shown: 'mint_failed',
+        terminal: true,
+        loadError: VALIDATION_LOAD_ERROR,
+      }),
+    );
+  });
+
+  it('keeps a renewal 400 E_VALIDATION_FAILED an ordinary renewal_failed', async () => {
+    const onAuthError = vi.fn();
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(session(TEN_MINUTES_S))
+      .mockRejectedValue({ status: 400, code: 'E_VALIDATION_FAILED' });
+    const manager = new SessionManager(fetch, onAuthError, vi.fn());
+
+    await manager.current();
+    manager.resume();
+    await vi.advanceTimersByTimeAsync(TEN_MINUTES_MS);
+
+    expect(onAuthError).toHaveBeenCalledWith(failure('renewal_failed'));
+    expect(onAuthError).not.toHaveBeenCalledWith(expect.objectContaining({ terminal: true }));
+  });
+
   it.each([
     ['without a code', { status: 403 }],
     ['with another code', { status: 403, code: 'E_TENANT_SUSPENDED' }],
     ['with the scope code on another status', { status: 400, code: 'E_SCOPE_NOT_ENTITLED' }],
+    ['400 without a code, from a route on an older @doola/js', { status: 400 }],
+    ['400 with another code', { status: 400, code: 'E_MALFORMED_JSON' }],
+    ['with the validation code on another status', { status: 422, code: 'E_VALIDATION_FAILED' }],
   ])('keeps a rejection %s an ordinary mint_failed', async (_, rejection) => {
     const onAuthError = vi.fn();
     const manager = new SessionManager(vi.fn().mockRejectedValue(rejection), onAuthError, vi.fn());
@@ -460,5 +497,52 @@ describe('the scope 403 across @doola/js/server and the loader', () => {
       failure('mint_failed', 'mint_failed', SCOPE_LOAD_ERROR),
     );
     expect(tokenError(onAuthError.mock.calls[0]![0]).payload.retryable).toBe(false);
+  });
+});
+
+describe('the validation 400 across @doola/js/server and the loader', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('is forwarded with a code the loader classifies as terminal, and no field reaches the browser', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          {
+            payload: null,
+            error: {
+              code: 'E_VALIDATION_FAILED',
+              message: 'one or more fields are invalid',
+              fields: {
+                'servicePrices.pricesInCents.EinCreation': {
+                  code: 'E_VALIDATION_FAILED',
+                  message: 'must be a whole number: 999.5',
+                },
+              },
+            },
+          },
+          { status: 400 },
+        ),
+      ),
+    );
+    const { status, code } = await createCustomerSession({
+      apiKey: 'dk_test_s3cr3tv4lu3',
+      customer: { email: 'founder@example.com', externalCustomerId: 'usr_1' },
+      servicePrices: { currency: 'MXN', pricesInCents: { EinCreation: 999.5 } },
+    });
+    const onAuthError = vi.fn();
+    const manager = new SessionManager(
+      vi.fn().mockRejectedValue({ status, code }),
+      onAuthError,
+      vi.fn(),
+    );
+
+    await expect(manager.current()).rejects.toBeDefined();
+
+    expect(onAuthError).toHaveBeenCalledWith(
+      failure('mint_failed', 'mint_failed', VALIDATION_LOAD_ERROR),
+    );
+    expect(tokenError(onAuthError.mock.calls[0]![0]).payload.retryable).toBe(false);
+    expect(JSON.stringify(onAuthError.mock.calls)).not.toMatch(/servicePrices|EinCreation|999\.5/);
   });
 });

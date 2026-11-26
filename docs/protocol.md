@@ -291,6 +291,15 @@ living in the partner's page).
      partner's configuration. On renewal it is an ordinary, retryable
      `renewal_failed`: the current token keeps working until it expires.
      Any other `403` is `mint_failed` or `renewal_failed`, retryable.
+   - `400` with `code` `E_VALIDATION_FAILED` → on the first mint, `mint_failed`
+     but terminal: doola refused a field the partner's server sent (a price in
+     `servicePrices`, a phone number), and every retry sends the same request.
+     Its `token-error` carries `retryable: false`, and the loader also calls
+     `onLoadError` with `invalid_request_error`, whose message names no field:
+     the field stays in the partner's server log. On renewal it is an ordinary,
+     retryable `renewal_failed`. A `400` with no `code` or another `code` is
+     `mint_failed` or `renewal_failed`, retryable: a route built before the
+     code was forwarded keeps the retry.
    - anything else → `mint_failed` on first mint, `renewal_failed` on renewal.
 
    In every case the loader also posts `token-error` into every mounted frame,

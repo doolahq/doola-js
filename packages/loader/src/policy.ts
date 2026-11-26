@@ -74,3 +74,13 @@ export const LOAD_FAILURE_MESSAGES = {
  */
 export const SCOPE_NOT_ENTITLED_MESSAGE =
   'The customer session asked for a scope this account is not enabled for. Ask doola to enable tax, or mint the session without sdk:tax.';
+
+/**
+ * What `onLoadError` says when doola refused the mint with a 400
+ * `E_VALIDATION_FAILED`. It names no field and no value: the browser is no
+ * place for them, and the partner's server already has both, in doola's
+ * `error.fields`, which `@doola/js/server` hands to `onFailure` as
+ * `doolaFields`. Every retry sends the same request, so Try again cannot help.
+ */
+export const VALIDATION_FAILED_MESSAGE =
+  'doola refused the customer session request because a field your server sent is invalid. Your server log names the field: onFailure in @doola/js/server receives it as doolaFields.';
