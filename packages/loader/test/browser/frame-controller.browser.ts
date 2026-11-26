@@ -607,6 +607,31 @@ test('a mint doola refused for a field is terminal, and reported as a load error
   });
 });
 
+test('on a phone, a mint doola refused for a field is terminal too, and the frame keeps the screen', async ({
+  page,
+}) => {
+  await mount(page, {
+    viewport: NARROW,
+    mintRejection: { status: 400, code: 'E_VALIDATION_FAILED' },
+  });
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBeGreaterThan(0);
+
+  const [tokenError] = (await received(frame)).filter((m) => m.data.type === 'token-error');
+  expect(tokenError?.data.payload).toMatchObject({ reason: 'mint_failed', retryable: false });
+  expect((await eventsOf(page, 'onLoadError'))[0]?.error).toMatchObject({
+    type: 'invalid_request_error',
+    message: VALIDATION_FAILED_MESSAGE,
+  });
+  // The frame spoke, so it is alive and renders the refusal itself, in the
+  // full screen `auto` gave it: a token-error is not a failed load, and the
+  // loader releases the overlay only for a frame that never started. Same as
+  // the scope 403.
+  await expect.poll(() => overlayState(page)).toEqual({ fixed: true, scrollLocked: true });
+});
+
 test('a 400 without a code, from a route on an older @doola/js, stays a retryable mint_failed', async ({
   page,
 }) => {

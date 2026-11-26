@@ -79,8 +79,10 @@ export const SCOPE_NOT_ENTITLED_MESSAGE =
  * What `onLoadError` says when doola refused the mint with a 400
  * `E_VALIDATION_FAILED`. It names no field and no value: the browser is no
  * place for them, and the partner's server already has both, in doola's
- * `error.fields`, which `@doola/js/server` hands to `onFailure` as
- * `doolaFields`. Every retry sends the same request, so Try again cannot help.
+ * `error.fields`. Worded for every route: `@doola/js/server` reports them as
+ * `failure.doolaFields` (to `onFailure`, or in `createCustomerSession`'s
+ * result), and a route in another language reads `error.fields` itself.
+ * Every retry sends the same request, so Try again cannot help.
  */
 export const VALIDATION_FAILED_MESSAGE =
-  'doola refused the customer session request because a field your server sent is invalid. Your server log names the field: onFailure in @doola/js/server receives it as doolaFields.';
+  "doola refused the customer session request because a field your server sent is invalid. doola's 400 response names the field in error.fields, which @doola/js/server reports as failure.doolaFields.";

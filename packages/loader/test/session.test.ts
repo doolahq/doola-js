@@ -1,4 +1,4 @@
-import { createCustomerSession } from '@doola/js/server';
+import { createCustomerSession, createSessionHandler } from '@doola/js/server';
 import { parseLoaderMessage, PROTOCOL_VERSION } from '@doola/sdk-protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -525,24 +525,41 @@ describe('the validation 400 across @doola/js/server and the loader', () => {
         ),
       ),
     );
-    const { status, code } = await createCustomerSession({
+    const onFailure = vi.fn();
+    const route = createSessionHandler({
       apiKey: 'dk_test_s3cr3tv4lu3',
-      customer: { email: 'founder@example.com', externalCustomerId: 'usr_1' },
+      getCustomer: () => ({ email: 'founder@example.com', externalCustomerId: 'usr_1' }),
       servicePrices: { currency: 'MXN', pricesInCents: { EinCreation: 999.5 } },
+      onFailure,
     });
+    let browserBody = '';
+
+    // The README's fetchAccessToken, reading the route's real response.
+    const fetchAccessToken = async () => {
+      const r = await route(
+        new Request('https://partner.example/doola-session', { method: 'POST' }),
+      );
+      browserBody = await r.clone().text();
+      if (!r.ok) {
+        const { code } = (await r.json().catch(() => ({}))) as { code?: string };
+        throw Object.assign(new Error('doola session'), { status: r.status, code });
+      }
+      return r.json();
+    };
     const onAuthError = vi.fn();
-    const manager = new SessionManager(
-      vi.fn().mockRejectedValue({ status, code }),
-      onAuthError,
-      vi.fn(),
-    );
+    const manager = new SessionManager(fetchAccessToken, onAuthError, vi.fn());
 
     await expect(manager.current()).rejects.toBeDefined();
 
+    expect(browserBody).toBe('{"code":"E_VALIDATION_FAILED"}');
     expect(onAuthError).toHaveBeenCalledWith(
       failure('mint_failed', 'mint_failed', VALIDATION_LOAD_ERROR),
     );
     expect(tokenError(onAuthError.mock.calls[0]![0]).payload.retryable).toBe(false);
     expect(JSON.stringify(onAuthError.mock.calls)).not.toMatch(/servicePrices|EinCreation|999\.5/);
+    // The field stays on the partner's server.
+    expect(onFailure.mock.calls[0]![0].doolaFields).toHaveProperty([
+      'servicePrices.pricesInCents.EinCreation',
+    ]);
   });
 });

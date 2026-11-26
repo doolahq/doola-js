@@ -43,12 +43,12 @@ const SCOPE_NOT_ENTITLED = 'E_SCOPE_NOT_ENTITLED';
 const VALIDATION_FAILED = 'E_VALIDATION_FAILED';
 
 /**
- * The first-mint refusals the partner's configuration causes, by status and
- * code. Each is terminal, and also reaches `onLoadError`.
+ * The first-mint refusals every retry repeats, by status and code: the same
+ * request mints the same refusal. Each is terminal, and also reaches
+ * `onLoadError`, since the fix is on the partner's side: its configuration,
+ * or the customer data its server sends.
  */
-const CONFIGURATION_REFUSALS: ReadonlyArray<
-  readonly [status: number, code: string, message: string]
-> = [
+const FINAL_REFUSALS: ReadonlyArray<readonly [status: number, code: string, message: string]> = [
   [403, SCOPE_NOT_ENTITLED, SCOPE_NOT_ENTITLED_MESSAGE],
   [400, VALIDATION_FAILED, VALIDATION_FAILED_MESSAGE],
 ];
@@ -87,9 +87,7 @@ function classifyRejection(error: unknown, renewal: boolean): Classified {
   const fallback = renewal ? 'renewal_failed' : 'mint_failed';
 
   if (status === 401) return same('partner_session_expired');
-  const refusal = renewal
-    ? undefined
-    : CONFIGURATION_REFUSALS.find(([s, c]) => s === status && c === code);
+  const refusal = renewal ? undefined : FINAL_REFUSALS.find(([s, c]) => s === status && c === code);
 
   if (refusal) {
     return {

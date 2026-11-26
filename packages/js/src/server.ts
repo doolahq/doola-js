@@ -94,8 +94,9 @@ export interface CustomerSessionResult {
    * doola's error code on a 409, such as `E_EMAIL_IN_USE`, on the 403
    * `E_SCOPE_NOT_ENTITLED`, or on the 400 `E_VALIDATION_FAILED`. Send it as
    * the JSON body `{ code }` with `status`, so `fetchAccessToken` can reject
-   * with it: the loader tells the 409s apart by this code, and stops retrying
-   * a scope your account does not hold or a field doola refused. Only the
+   * with it: the loader tells the 409s apart by this code, and the frame
+   * offers no Try again for a scope your account does not hold or a field
+   * doola refused. Only the
    * code: which field doola refused stays in `failure.doolaFields`.
    * Unlike `failure`, it is safe for the browser.
    */
@@ -398,7 +399,8 @@ async function mint(
     // send a signed-in customer to the partner's login, on every renewal.
     if (doolaStatus === 401) return failed(502, { reason: 'doola_unauthorized', ...detail });
 
-    // Every other status passes through, a 409 with doola's code so the loader
+    // Every other status passes through, a 409, the scope 403 and the
+    // validation 400 with doola's code so the loader
     // can tell them apart, and a status doola adds later needs no change here.
     return refused(doolaStatus, { reason: 'doola_error', ...detail });
   }
