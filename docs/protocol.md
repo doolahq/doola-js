@@ -290,8 +290,10 @@ living in the partner's page).
      refusal. Its `token-error` carries `retryable: false`, and the loader also
      calls `onLoadError` with `invalid_request_error`, since the fix is the
      partner's configuration. On renewal it is an ordinary, retryable
-     `renewal_failed`: the current token keeps working until it expires.
-     Any other `403` is `mint_failed` or `renewal_failed`, retryable.
+     `renewal_failed`: while the frame holds a live token, it keeps working
+     until it expires. A mint after the session went stale counts as a renewal
+     too, so that frame gets the retryable `renewal_failed` with no live token
+     behind it. Any other `403` is `mint_failed` or `renewal_failed`, retryable.
    - `400` with `code` `E_VALIDATION_FAILED` → on the first mint, `mint_failed`
      but terminal: doola refused a field the partner's server sent (a price in
      `servicePrices`, a phone number), and every retry sends the same request.
