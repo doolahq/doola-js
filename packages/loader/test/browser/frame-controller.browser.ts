@@ -7,6 +7,7 @@ import {
   PLACEHOLDER_FRAME_HEIGHT_PX,
   READY_AFTER_LOAD_MS,
   SCOPE_NOT_ENTITLED_MESSAGE,
+  VALIDATION_FAILED_MESSAGE,
 } from '../../src/policy';
 import { APP_PAGE, navigatedFrame, startHarness, type Harness } from './harness';
 
@@ -72,6 +73,8 @@ async function mount(
     mintDelayMs?: number;
     /** What the partner's route rejects with, in place of the 503 `mintFails` sends. */
     mintRejection?: { status: number; code?: string };
+    /** onAuthError records the event, then throws, as a partner's buggy handler would. */
+    onAuthErrorThrows?: boolean;
     product?: string;
     withoutOnFormed?: boolean;
   } = {},
@@ -80,7 +83,15 @@ async function mount(
   await page.goto(harness.partnerOrigin);
 
   await page.evaluate(
-    ({ sdkOrigin, mintFails, mintDelayMs, mintRejection, product, withoutOnFormed }) => {
+    ({
+      sdkOrigin,
+      mintFails,
+      mintDelayMs,
+      mintRejection,
+      onAuthErrorThrows,
+      product,
+      withoutOnFormed,
+    }) => {
       const w = window as unknown as PartnerWindow;
       w.__events = [];
       w.__mintFails = mintFails;
@@ -106,7 +117,10 @@ async function mount(
             ? new Promise((resolve) => setTimeout(() => resolve(session), mintDelayMs))
             : Promise.resolve(session);
         },
-        onAuthError: (error) => w.__events.push({ handler: 'onAuthError', error }),
+        onAuthError: (error) => {
+          w.__events.push({ handler: 'onAuthError', error });
+          if (onAuthErrorThrows) throw new TypeError('the partner handler broke');
+        },
         ...(withoutOnFormed
           ? {}
           : { onFormed: (event) => w.__events.push({ handler: 'onFormed', event }) }),
@@ -125,6 +139,7 @@ async function mount(
       mintFails: options.mintFails ?? options.mintRejection !== undefined,
       mintDelayMs: options.mintDelayMs ?? 0,
       mintRejection: options.mintRejection,
+      onAuthErrorThrows: options.onAuthErrorThrows ?? false,
       product: options.product,
       withoutOnFormed: options.withoutOnFormed ?? false,
     },
@@ -586,6 +601,81 @@ test('a mint refused for its scope is terminal, and reported as a load error too
   // handler hears the incident twice, which errors.md allows.
   await expect.poll(async () => (await eventsOf(page, 'onAuthError')).length).toBe(2);
   await expect.poll(async () => (await eventsOf(page, 'onLoadError')).length).toBe(2);
+});
+
+test('a mint doola refused for a field is terminal, and reported as a load error too', async ({
+  page,
+}) => {
+  await mount(page, { mintRejection: { status: 400, code: 'E_VALIDATION_FAILED' } });
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBeGreaterThan(0);
+
+  const tokenErrors = (await received(frame)).filter((m) => m.data.type === 'token-error');
+  expect(tokenErrors[0]?.data.payload).toMatchObject({ reason: 'mint_failed', retryable: false });
+  expect((await eventsOf(page, 'onAuthError'))[0]?.error).toMatchObject({ type: 'mint_failed' });
+  expect((await eventsOf(page, 'onLoadError'))[0]?.error).toMatchObject({
+    type: 'invalid_request_error',
+    message: VALIDATION_FAILED_MESSAGE,
+  });
+});
+
+test('on a phone, a mint doola refused for a field is terminal too, and the frame keeps the screen', async ({
+  page,
+}) => {
+  await mount(page, {
+    viewport: NARROW,
+    mintRejection: { status: 400, code: 'E_VALIDATION_FAILED' },
+  });
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBeGreaterThan(0);
+
+  const [tokenError] = (await received(frame)).filter((m) => m.data.type === 'token-error');
+  expect(tokenError?.data.payload).toMatchObject({ reason: 'mint_failed', retryable: false });
+  expect((await eventsOf(page, 'onLoadError'))[0]?.error).toMatchObject({
+    type: 'invalid_request_error',
+    message: VALIDATION_FAILED_MESSAGE,
+  });
+  // The frame spoke, so it is alive and renders the refusal itself, in the
+  // full screen `auto` gave it: a token-error is not a failed load, and the
+  // loader releases the overlay only for a frame that never started. Same as
+  // the scope 403.
+  await expect.poll(() => overlayState(page)).toEqual({ fixed: true, scrollLocked: true });
+});
+
+for (const [label, rejection, message] of [
+  ['scope 403', { status: 403, code: 'E_SCOPE_NOT_ENTITLED' }, SCOPE_NOT_ENTITLED_MESSAGE],
+  ['validation 400', { status: 400, code: 'E_VALIDATION_FAILED' }, VALIDATION_FAILED_MESSAGE],
+] as const) {
+  test(`a throwing onAuthError does not skip onLoadError for the ${label}`, async ({ page }) => {
+    await mount(page, { mintRejection: rejection, onAuthErrorThrows: true });
+    const frame = await appFrame(page);
+
+    await sendFromApp(frame, ready);
+    await expect.poll(() => countOfType(frame, 'token-error')).toBeGreaterThan(0);
+
+    expect((await eventsOf(page, 'onAuthError'))[0]?.error).toMatchObject({ type: 'mint_failed' });
+    await expect
+      .poll(async () => (await eventsOf(page, 'onLoadError'))[0]?.error)
+      .toMatchObject({ type: 'invalid_request_error', message });
+  });
+}
+
+test('a 400 without a code, from a route on an older @doola/js, stays a retryable mint_failed', async ({
+  page,
+}) => {
+  await mount(page, { mintRejection: { status: 400 } });
+  const frame = await appFrame(page);
+
+  await sendFromApp(frame, ready);
+  await expect.poll(() => countOfType(frame, 'token-error')).toBeGreaterThan(0);
+
+  const [tokenError] = (await received(frame)).filter((m) => m.data.type === 'token-error');
+  expect(tokenError?.data.payload).toMatchObject({ reason: 'mint_failed', retryable: true });
+  expect(await eventsOf(page, 'onLoadError')).toHaveLength(0);
 });
 
 test('any other 403 stays a retryable mint_failed with no load error', async ({ page }) => {

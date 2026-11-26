@@ -86,8 +86,8 @@ export const POST = createSessionHandler({
     return user ? { email: user.email, externalCustomerId: user.id } : null;
   },
 
-  // The browser gets the status, plus doola's error code when doola refused the customer or
-  // the session's scopes.
+  // The browser gets the status, plus doola's error code when doola refused the customer, the
+  // session's scopes or a field your server sent.
   // This says why, for your logs: a revoked key, an outage, or a field doola rejected.
   onFailure: (failure) => console.error('doola session failed', failure),
 });
@@ -135,7 +135,8 @@ ISO 4217 minor unit: 2 decimals for USD, none for CLP, 3 for KWD.
 The helpers send the prices as they are, and doola checks them: an unknown name or currency, or an
 amount that is negative or not a whole number, is refused with a 400 `E_VALIDATION_FAILED`. Then
 every mint of that route fails: `onFailure` gets the 400, with `doolaFields` naming the refused
-field, and the founder sees the session error with Try again. Check your prices in test mode first.
+field, and the founder sees the session error without Try again, since retrying cannot fix it.
+`onLoadError` gets `invalid_request_error`. Check your prices in test mode first.
 
 Express, Fastify and other languages: [Create sessions](https://docs.doola.com/sdk/sessions).
 

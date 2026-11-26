@@ -91,11 +91,13 @@ export interface CustomerSessionResult {
   body: { accessToken: string; expiresIn: number } | null;
 
   /**
-   * doola's error code on a 409, such as `E_EMAIL_IN_USE`, or on the 403
-   * `E_SCOPE_NOT_ENTITLED`. Send it as the JSON body `{ code }` with `status`,
-   * so `fetchAccessToken` can reject with it: the loader tells the 409s apart
-   * by this code, and stops retrying a scope your account does not hold.
-   * Unlike `failure`, it is safe for the browser.
+   * doola's error code on a 409, such as `E_EMAIL_IN_USE`, on the 403
+   * `E_SCOPE_NOT_ENTITLED`, or on the 400 `E_VALIDATION_FAILED`. Send it as
+   * the JSON body `{ code }` with `status`, so `fetchAccessToken` can reject
+   * with it: the loader tells the 409s apart by this code, and the frame
+   * offers no Try again for a scope your account does not hold or a field
+   * doola refused. Only the code: which field doola refused stays in
+   * `failure.doolaFields`. Unlike `failure`, it is safe for the browser.
    */
   code?: string;
 
@@ -343,13 +345,18 @@ function failed(status: number, failure: CustomerSessionFailure): CustomerSessio
 }
 
 const SCOPE_NOT_ENTITLED = 'E_SCOPE_NOT_ENTITLED';
+const VALIDATION_FAILED = 'E_VALIDATION_FAILED';
 
-// A 409 is about the customer, and the scope 403 decides whether the founder
-// may retry. Every other code (the 401 and other 403s about the key or tenant,
-// the 400s about the request) is the partner's to log.
+// A 409 is about the customer, and the scope 403 and the validation 400 decide
+// whether the founder may retry. Every other code (the 401 and other 403s about
+// the key or tenant, other 400s about the request) is the partner's to log. The
+// code alone, never doola's message or fields, which may name what was sent.
 function refused(status: number, failure: CustomerSessionFailure): CustomerSessionResult {
   const { doolaCode } = failure;
-  const forwarded = status === 409 || (status === 403 && doolaCode === SCOPE_NOT_ENTITLED);
+  const forwarded =
+    status === 409 ||
+    (status === 403 && doolaCode === SCOPE_NOT_ENTITLED) ||
+    (status === 400 && doolaCode === VALIDATION_FAILED);
 
   return forwarded && doolaCode
     ? { ...failed(status, failure), code: doolaCode }
@@ -391,8 +398,9 @@ async function mint(
     // send a signed-in customer to the partner's login, on every renewal.
     if (doolaStatus === 401) return failed(502, { reason: 'doola_unauthorized', ...detail });
 
-    // Every other status passes through, a 409 with doola's code so the loader
-    // can tell them apart, and a status doola adds later needs no change here.
+    // Every other status passes through, a 409, the scope 403 and the
+    // validation 400 with doola's code so the loader can tell them apart, and
+    // a status doola adds later needs no change here.
     return refused(doolaStatus, { reason: 'doola_error', ...detail });
   }
 

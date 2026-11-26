@@ -72,12 +72,18 @@ function init(options: DoolaOptions): Doola {
 
   // A failed fetch is answered on both sides: the frame gets token-error so
   // it never hangs on an unanswered token-request, the partner gets onAuthError.
+  // onLoadError runs in the finally: it is the only signal that a refusal is
+  // the partner's to fix, so a throwing onAuthError must not skip it, and its
+  // error still propagates as before.
   const sessions = new SessionManager(
     fetchAccessToken,
     (failure) => {
       broadcast(tokenError(failure));
-      onAuthError(failure.error);
-      if (failure.loadError) handlers.onLoadError?.(failure.loadError);
+      try {
+        onAuthError(failure.error);
+      } finally {
+        if (failure.loadError) handlers.onLoadError?.(failure.loadError);
+      }
     },
     (session) => {
       for (const frame of mounted) frame.deliver(session);

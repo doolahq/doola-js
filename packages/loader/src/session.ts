@@ -1,7 +1,7 @@
 import type { CustomerSession, DoolaAuthError, DoolaLoadError, FetchAccessToken } from '@doola/js';
 import type { LoaderMessage } from '@doola/sdk-protocol';
 
-import { SCOPE_NOT_ENTITLED_MESSAGE } from './policy';
+import { SCOPE_NOT_ENTITLED_MESSAGE, VALIDATION_FAILED_MESSAGE } from './policy';
 
 /**
  * Renew at this fraction of the token's lifetime. Loader policy,
@@ -34,6 +34,24 @@ const CONFLICTS: ReadonlyMap<string, DoolaAuthError['type']> = new Map([
 
 /** A 403 that names the scope, not the key or tenant, so a retry can never succeed. */
 const SCOPE_NOT_ENTITLED = 'E_SCOPE_NOT_ENTITLED';
+
+/**
+ * A 400 in which doola refused a field the partner's server sent, such as a
+ * price, so every retry repeats the refusal. Only with the code: a bare 400
+ * may come from the partner's own route, and keeps today's retry.
+ */
+const VALIDATION_FAILED = 'E_VALIDATION_FAILED';
+
+/**
+ * The first-mint refusals every retry repeats, by status and code: the same
+ * request mints the same refusal. Each is terminal, and also reaches
+ * `onLoadError`, since the fix is on the partner's side: its configuration,
+ * or the customer data its server sends.
+ */
+const FINAL_REFUSALS: ReadonlyArray<readonly [status: number, code: string, message: string]> = [
+  [403, SCOPE_NOT_ENTITLED, SCOPE_NOT_ENTITLED_MESSAGE],
+  [400, VALIDATION_FAILED, VALIDATION_FAILED_MESSAGE],
+];
 
 /**
  * doola's codes only. A client library puts its own `code` on a rejection
@@ -69,11 +87,13 @@ function classifyRejection(error: unknown, renewal: boolean): Classified {
   const fallback = renewal ? 'renewal_failed' : 'mint_failed';
 
   if (status === 401) return same('partner_session_expired');
-  if (status === 403 && code === SCOPE_NOT_ENTITLED && !renewal) {
+  const refusal = renewal ? undefined : FINAL_REFUSALS.find(([s, c]) => s === status && c === code);
+
+  if (refusal) {
     return {
       ...same(fallback),
       terminal: true,
-      loadError: { type: 'invalid_request_error', message: SCOPE_NOT_ENTITLED_MESSAGE },
+      loadError: { type: 'invalid_request_error', message: refusal[2] },
     };
   }
   if (status !== 409) return same(fallback);

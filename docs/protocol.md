@@ -259,8 +259,9 @@ living in the partner's page).
    when the renewal cannot succeed, `token-error` (step 4), so the frame is
    never left waiting.
 4. A `fetchAccessToken` rejection is mapped by the loader from the `status` the
-   rejection exposes, and for a 409 from its `code` (the convention lives in
-   the contract, on `FetchAccessToken`); a synchronous throw is treated as a
+   rejection exposes, and for a 409, the 403 `E_SCOPE_NOT_ENTITLED` and the
+   400 `E_VALIDATION_FAILED` from its `code` (the convention lives in the
+   contract, on `FetchAccessToken`); a synchronous throw is treated as a
    rejection with no `status`:
    - `401` → `onAuthError({ type: 'partner_session_expired', message: … })`,
      and the loader stops retrying on its own — automatic renewal ends, but a
@@ -289,8 +290,21 @@ living in the partner's page).
      refusal. Its `token-error` carries `retryable: false`, and the loader also
      calls `onLoadError` with `invalid_request_error`, since the fix is the
      partner's configuration. On renewal it is an ordinary, retryable
-     `renewal_failed`: the current token keeps working until it expires.
-     Any other `403` is `mint_failed` or `renewal_failed`, retryable.
+     `renewal_failed`: while the frame holds a live token, it keeps working
+     until it expires. A mint after the session went stale counts as a renewal
+     too, so that frame gets the retryable `renewal_failed` with no live token
+     behind it. Any other `403` is `mint_failed` or `renewal_failed`, retryable.
+   - `400` with `code` `E_VALIDATION_FAILED` → on the first mint, `mint_failed`
+     but terminal: doola refused a field the partner's server sent (a price in
+     `servicePrices`, a phone number), and every retry sends the same request.
+     Its `token-error` carries `retryable: false`, and the loader also calls
+     `onLoadError` with `invalid_request_error`, whose message names no field:
+     the field stays on the partner's server. On renewal it is an ordinary,
+     retryable `renewal_failed`. A mint after the session went stale counts as
+     a renewal too (a session existed), so that frame gets the retryable
+     `renewal_failed` with no live token behind it. A `400` with no `code` or
+     another `code` is `mint_failed` or `renewal_failed`, retryable: a route
+     that does not forward the code keeps the retry.
    - anything else → `mint_failed` on first mint, `renewal_failed` on renewal.
 
    In every case the loader also posts `token-error` into every mounted frame,

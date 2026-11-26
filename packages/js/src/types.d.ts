@@ -55,7 +55,12 @@ export interface CustomerSession {
  * (`@doola/js/server` does): doola answers 409 for several reasons, and
  * the code is the only thing that tells them apart. It also marks the
  * 403 `E_SCOPE_NOT_ENTITLED`, a session asking for a scope your account
- * does not hold, which retrying never fixes.
+ * does not hold, and the 400 `E_VALIDATION_FAILED`, a session request
+ * with a field doola refused. Retrying never fixes either, so after
+ * either on the first fetch the frame offers no Try again, and the
+ * loader also calls `onLoadError`. A later `ready` or a new mount still
+ * fetches again, so both handlers must stay idempotent. A 400 without
+ * the code stays retryable.
  * The route itself must never flatten a failure to 200, and must never
  * forward doola's own 401: that status means the partner's key or
  * tenant, not the customer's session, and the loader reads any 401 as

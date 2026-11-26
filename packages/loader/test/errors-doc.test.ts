@@ -3,7 +3,11 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { LOAD_FAILURE_MESSAGES, SCOPE_NOT_ENTITLED_MESSAGE } from '../src/policy';
+import {
+  LOAD_FAILURE_MESSAGES,
+  SCOPE_NOT_ENTITLED_MESSAGE,
+  VALIDATION_FAILED_MESSAGE,
+} from '../src/policy';
 
 /**
  * `docs/errors.md` is contract surface (CONTRIBUTING), and these
@@ -22,6 +26,7 @@ describe('docs/errors.md', () => {
   it.each([
     ...Object.entries(LOAD_FAILURE_MESSAGES),
     ['scopeNotEntitled', SCOPE_NOT_ENTITLED_MESSAGE],
+    ['validationFailed', VALIDATION_FAILED_MESSAGE],
   ])('quotes the %s message verbatim', (_cause, message) => {
     expect(doc).toContain(message);
   });
