@@ -198,9 +198,8 @@ export interface SessionHandlerOptions {
    * As in {@link CustomerSessionOptions.servicePrices}, sent for every
    * customer of this route: one price list kept in your code. They are read
    * once, when the handler is created, so a later change to the object is
-   * not sent. For prices per
-   * customer, or prices that change while the route runs, call
-   * {@link createCustomerSession} per request instead.
+   * not sent. For prices per customer, or prices that change while the route
+   * runs, call {@link createCustomerSession} per request instead.
    */
   servicePrices?: DoolaServicePrices | undefined;
 }
