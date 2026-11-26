@@ -51,22 +51,28 @@ export type DoolaPricedService = 'EinCreation' | 'VariantEinExpedited';
  * Your prices for one session, shown in the SDK in place of the prices set in
  * the Partner Portal. If you send prices, they are the complete price list for
  * that customer: a service you leave out is not offered. If you send none, the
- * portal's prices apply. doola never charges these: you do, on your own page.
+ * portal's prices apply. A list that prices nothing counts as none, so there
+ * is no way to offer none of the priced services here: to offer none, turn
+ * them off in the Partner Portal. doola never charges these: you do, on your
+ * own page.
  *
- * doola checks them, not the helpers: an unknown currency, or an amount that is
+ * The helpers send them as they are, every name in `pricesInCents` included,
+ * and doola checks them: an unknown name or currency, or an amount that is
  * negative or not a whole number, is refused with a 400 `E_VALIDATION_FAILED`.
  */
 export interface DoolaServicePrices {
   /**
-   * The ISO 4217 code of every price, such as `USD`, `MXN` or `CLP`. Required
-   * when any price is sent.
+   * The ISO 4217 code of the prices in `pricesInCents`, such as `USD`, `MXN`
+   * or `CLP`. It applies to those prices only.
    */
   currency: string;
 
   /**
-   * Per service, a whole number of at least 0 in the currency's smallest unit:
-   * USD 149.00 is `14900`. For a currency without cents it is the whole amount:
-   * CLP 140.000 is `140000`. Empty means no prices, so the portal's apply.
+   * Per service, a whole number of at least 0 in the currency's ISO 4217
+   * minor unit: 2 decimals for USD, so USD 149.00 is `14900`; none for CLP,
+   * so CLP 140,000 is `140000`; 3 for KWD, so KWD 1.500 is `1500`. Empty
+   * means no prices, so the portal's apply, and a name whose value is
+   * `undefined` is left out.
    */
   pricesInCents: Readonly<Partial<Record<DoolaPricedService, number>>>;
 }
@@ -118,6 +124,14 @@ export interface CustomerSessionFailure {
 
   /** `error.code` from doola's error envelope, such as `E_VALIDATION_FAILED`. */
   doolaCode?: string;
+
+  /**
+   * `error.fields` from doola's error envelope, set only when doola sends it,
+   * as on a 400 `E_VALIDATION_FAILED`: each refused field by its path, such as
+   * `servicePrices.pricesInCents.EinExpedited`, with its own `code` when doola
+   * gives one, and a `message`. For your logs only: never send it to the browser.
+   */
+  doolaFields?: Readonly<Record<string, { code?: string; message?: string }>>;
 }
 
 /** For {@link createCustomerSession}. */
@@ -182,8 +196,10 @@ export interface SessionHandlerOptions {
 
   /**
    * As in {@link CustomerSessionOptions.servicePrices}, sent for every
-   * customer of this route: one price list kept in your code, such as prices
-   * in a currency other than USD. For prices per customer, call
+   * customer of this route: one price list kept in your code. They are read
+   * once, when the handler is created, so a later change to the object is
+   * not sent. For prices per
+   * customer, or prices that change while the route runs, call
    * {@link createCustomerSession} per request instead.
    */
   servicePrices?: DoolaServicePrices | undefined;
@@ -234,9 +250,10 @@ interface SessionFields {
   servicePrices: DoolaServicePrices | undefined;
 }
 
-// Picked like the customer, and copied, so a handler keeps the prices it was
-// created with. The values pass as they are: doola checks them and names the
-// field it refuses.
+// The top level is picked like the customer, and pricesInCents is copied, so a
+// handler keeps the prices it was created with. Its names and amounts pass as
+// they are: doola refuses an unknown name, so a typo fails loudly instead of
+// being dropped here and hiding a service.
 function pickPrices(prices: DoolaServicePrices | undefined): DoolaServicePrices | undefined {
   if (!prices) return undefined;
 
@@ -300,6 +317,28 @@ function doolaCodeFrom({ error }: Record<string, unknown>): { doolaCode?: string
   return isRecord(error) && typeof error.code === 'string' ? { doolaCode: error.code } : {};
 }
 
+// Only code and message, and only when they are strings, so the partner's log
+// gets doola's documented field error and nothing else the envelope may carry.
+function doolaFieldsFrom({
+  error,
+}: Record<string, unknown>): Pick<CustomerSessionFailure, 'doolaFields'> {
+  if (!isRecord(error) || !isRecord(error.fields)) return {};
+
+  const doolaFields: Record<string, { code?: string; message?: string }> = {};
+
+  for (const [field, value] of Object.entries(error.fields)) {
+    if (!isRecord(value)) continue;
+
+    const { code, message } = value;
+    doolaFields[field] = {
+      ...(typeof code === 'string' ? { code } : {}),
+      ...(typeof message === 'string' ? { message } : {}),
+    };
+  }
+
+  return { doolaFields };
+}
+
 function failed(status: number, failure: CustomerSessionFailure): CustomerSessionResult {
   return { status, body: null, failure };
 }
@@ -323,6 +362,9 @@ async function mint(
   customer: DoolaCustomer,
   fields: SessionFields,
 ): Promise<CustomerSessionResult> {
+  // Outside the try: prices JSON cannot encode, such as a bigint, are a bug in
+  // the caller, not doola being unreachable, and no request was sent.
+  const body = mintRequestBody(customer, fields);
   const signal = AbortSignal.timeout(MINT_TIMEOUT_MS);
   let response: Response;
 
@@ -330,7 +372,7 @@ async function mint(
     response = await fetch(`${apiOrigin}/v1/partner/customer-sessions`, {
       method: 'POST',
       headers: { authorization: apiKey, 'content-type': 'application/json' },
-      body: mintRequestBody(customer, fields),
+      body,
       signal,
     });
   } catch {
@@ -343,7 +385,7 @@ async function mint(
   const doolaStatus = response.status;
 
   if (!response.ok) {
-    const detail = { doolaStatus, ...doolaCodeFrom(envelope) };
+    const detail = { doolaStatus, ...doolaCodeFrom(envelope), ...doolaFieldsFrom(envelope) };
 
     // doola's 401 means the key or tenant is wrong, not the customer's session.
     // The loader reads any 401 as partner_session_expired, so passing it on would
@@ -355,9 +397,9 @@ async function mint(
     return refused(doolaStatus, { reason: 'doola_error', ...detail });
   }
 
-  const body = sessionFrom(envelope);
+  const session = sessionFrom(envelope);
 
-  if (body) return { status: 200, body };
+  if (session) return { status: 200, body: session };
 
   // The timeout also covers the body, and readEnvelope swallows the abort, so a
   // session cut off mid-body is doola being slow, not doola sending garbage.
@@ -386,7 +428,8 @@ function respond({ status, body, code }: CustomerSessionResult): Response {
  *
  * Never rejects for a doola or network failure: those resolve to a status, with
  * `failure` saying why. It rejects only for a missing or invalid `apiKey`, which
- * is checked on every call, so let your framework's error handling see it.
+ * is checked on every call, and for prices JSON cannot encode, such as a
+ * bigint, so let your framework's error handling see it.
  */
 export async function createCustomerSession(
   options: CustomerSessionOptions,
@@ -405,8 +448,8 @@ export async function createCustomerSession(
  * Workers and Node 18 or later. Throws at once for a key that is present but
  * invalid, such as a publishable `pk_` key.
  *
- * A missing key, and an error from `getCustomer` or `onFailure`, reject the
- * request, to your framework's own error handling.
+ * A missing key, prices JSON cannot encode, and an error from `getCustomer` or
+ * `onFailure`, reject the request, to your framework's own error handling.
  */
 export function createSessionHandler(
   options: SessionHandlerOptions,

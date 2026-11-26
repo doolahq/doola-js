@@ -13,6 +13,10 @@ export function createSessionHandler(options: SessionHandlerOptions): (request: 
 // @public
 export interface CustomerSessionFailure {
     doolaCode?: string;
+    doolaFields?: Readonly<Record<string, {
+        code?: string;
+        message?: string;
+    }>>;
     doolaStatus?: number;
     reason: 'doola_unauthorized' | 'doola_error' | 'doola_unreachable' | 'invalid_response';
 }
