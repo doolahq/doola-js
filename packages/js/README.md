@@ -97,6 +97,40 @@ The token acts as that one customer and expires in minutes. The loader calls you
 renew it, so a doola session never outlives your own login. Protect the route like any other
 authenticated `POST`, including your CSRF protection.
 
+**Prices, optional.** The SDK shows your prices next to the services it offers, and you charge for
+them on your own page. Set them in the Partner Portal, and your code changes nothing. Or send them
+from your server with `servicePrices`, in place of the portal's for that session. **If you send
+prices, they are the complete price list for that customer. If you send none, the portal's prices
+apply.** A service you leave out of the prices you send is not offered to that customer.
+
+<!-- example: session-prices -->
+
+```ts
+import { createSessionHandler } from '@doola/js/server';
+
+export const POST = createSessionHandler({
+  apiKey: process.env.DOOLA_API_KEY,
+  getCustomer: async (request) => {
+    const user = await getSignedInUser(request);
+    return user ? { email: user.email, externalCustomerId: user.id } : null;
+  },
+  // Optional. Set once, for every customer of this route.
+  servicePrices: {
+    currency: 'MXN', // ISO 4217, required when you send any price
+    // Whole amounts in the currency's smallest unit: 99900 is MXN 999.00.
+    pricesInCents: { EinCreation: 99900, VariantEinExpedited: 149900 },
+  },
+});
+```
+
+`createSessionHandler` sends the same prices for every customer, which suits one price list kept in
+your code, such as prices in a currency other than USD, which the portal does not hold. For prices
+per customer, call `createCustomerSession({ apiKey, customer, servicePrices })` in your own route
+and choose them per request. `EinCreation` is an EIN on its own and `VariantEinExpedited` the extra
+on top of a Standard EIN. doola checks the prices: an unknown currency, or an amount that is
+negative or not a whole number, is refused with a 400 `E_VALIDATION_FAILED`, which `onFailure`
+reports.
+
 Express, Fastify and other languages: [Create sessions](https://docs.doola.com/sdk/sessions).
 
 ## 2. Mount in the browser

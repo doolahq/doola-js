@@ -39,6 +39,39 @@ export interface DoolaCustomer {
 export type DoolaScope = 'sdk:formation' | 'sdk:tax';
 
 /**
+ * A service the SDK sells on top of the formation, by its price name.
+ * `EinCreation` is an EIN on its own. `VariantEinExpedited` is the extra on top
+ * of a Standard EIN, the price of `variant: "Expedite"` on `EinCreation` in the
+ * Partner API. EIN in the formation flow is part of the formation, so it needs
+ * no price.
+ */
+export type DoolaPricedService = 'EinCreation' | 'VariantEinExpedited';
+
+/**
+ * Your prices for one session, shown in the SDK in place of the prices set in
+ * the Partner Portal. If you send prices, they are the complete price list for
+ * that customer: a service you leave out is not offered. If you send none, the
+ * portal's prices apply. doola never charges these: you do, on your own page.
+ *
+ * doola checks them, not the helpers: an unknown currency, or an amount that is
+ * negative or not a whole number, is refused with a 400 `E_VALIDATION_FAILED`.
+ */
+export interface DoolaServicePrices {
+  /**
+   * The ISO 4217 code of every price, such as `USD`, `MXN` or `CLP`. Required
+   * when any price is sent.
+   */
+  currency: string;
+
+  /**
+   * Per service, a whole number of at least 0 in the currency's smallest unit:
+   * USD 149.00 is `14900`. For a currency without cents it is the whole amount:
+   * CLP 140.000 is `140000`. Empty means no prices, so the portal's apply.
+   */
+  pricesInCents: Readonly<Partial<Record<DoolaPricedService, number>>>;
+}
+
+/**
  * What the session route sends the browser: the status, and the JSON body when
  * there is one. `body` is set only with status 200, and carries exactly what
  * `fetchAccessToken` resolves with. A failure carries `code` instead, when
@@ -106,6 +139,14 @@ export interface CustomerSessionOptions {
    * is not sent and doola mints formation only.
    */
   scopes?: readonly DoolaScope[] | undefined;
+
+  /**
+   * This customer's prices, in place of the Partner Portal's for this
+   * session. Omitted, the field is not sent and the portal's prices apply.
+   * Send them on every call: each renewal is a new session, and one without
+   * prices falls back to the portal's.
+   */
+  servicePrices?: DoolaServicePrices | undefined;
 }
 
 /** For {@link createSessionHandler}. */
@@ -138,6 +179,14 @@ export interface SessionHandlerOptions {
    * {@link createCustomerSession} per request instead.
    */
   scopes?: readonly DoolaScope[] | undefined;
+
+  /**
+   * As in {@link CustomerSessionOptions.servicePrices}, sent for every
+   * customer of this route: one price list kept in your code, such as prices
+   * in a currency other than USD. For prices per customer, call
+   * {@link createCustomerSession} per request instead.
+   */
+  servicePrices?: DoolaServicePrices | undefined;
 }
 
 interface Credentials {
@@ -178,11 +227,29 @@ function credentials(apiKey: string | undefined): Credentials {
   return { apiKey, apiOrigin: match[1] };
 }
 
+// What a mint sends besides the customer. An undefined field is left out of
+// the body.
+interface SessionFields {
+  scopes: readonly DoolaScope[] | undefined;
+  servicePrices: DoolaServicePrices | undefined;
+}
+
+// Picked like the customer, and copied, so a handler keeps the prices it was
+// created with. The values pass as they are: doola checks them and names the
+// field it refuses.
+function pickPrices(prices: DoolaServicePrices | undefined): DoolaServicePrices | undefined {
+  if (!prices) return undefined;
+
+  const { currency, pricesInCents } = prices;
+
+  return { currency, pricesInCents: { ...pricesInCents } };
+}
+
 // Picked rather than spread: a user record passed as the customer must not
 // forward the rest of its fields to doola.
 function mintRequestBody(
   customer: DoolaCustomer,
-  scopes: readonly DoolaScope[] | undefined,
+  { scopes, servicePrices }: SessionFields,
 ): string {
   const { email, externalCustomerId, firstName, lastName, countryOfResidence, phoneNumber } =
     customer;
@@ -195,6 +262,7 @@ function mintRequestBody(
     countryOfResidence,
     phoneNumber,
     scopes,
+    servicePrices,
   });
 }
 
@@ -253,7 +321,7 @@ function refused(status: number, failure: CustomerSessionFailure): CustomerSessi
 async function mint(
   { apiKey, apiOrigin }: Credentials,
   customer: DoolaCustomer,
-  scopes: readonly DoolaScope[] | undefined,
+  fields: SessionFields,
 ): Promise<CustomerSessionResult> {
   const signal = AbortSignal.timeout(MINT_TIMEOUT_MS);
   let response: Response;
@@ -262,7 +330,7 @@ async function mint(
     response = await fetch(`${apiOrigin}/v1/partner/customer-sessions`, {
       method: 'POST',
       headers: { authorization: apiKey, 'content-type': 'application/json' },
-      body: mintRequestBody(customer, scopes),
+      body: mintRequestBody(customer, fields),
       signal,
     });
   } catch {
@@ -323,7 +391,12 @@ function respond({ status, body, code }: CustomerSessionResult): Response {
 export async function createCustomerSession(
   options: CustomerSessionOptions,
 ): Promise<CustomerSessionResult> {
-  return mint(credentials(options.apiKey), options.customer, options.scopes);
+  const { apiKey, customer, scopes, servicePrices } = options;
+
+  return mint(credentials(apiKey), customer, {
+    scopes,
+    servicePrices: pickPrices(servicePrices),
+  });
 }
 
 /**
@@ -339,7 +412,10 @@ export function createSessionHandler(
   options: SessionHandlerOptions,
 ): (request: Request) => Promise<Response> {
   const { apiKey, getCustomer, onFailure } = options;
-  const scopes = options.scopes && [...options.scopes];
+  const fields: SessionFields = {
+    scopes: options.scopes && [...options.scopes],
+    servicePrices: pickPrices(options.servicePrices),
+  };
   const checked = apiKey ? credentials(apiKey) : undefined;
 
   return async (request) => {
@@ -348,7 +424,7 @@ export function createSessionHandler(
 
     if (!customer) return respond({ status: 401, body: null });
 
-    const result = await mint(resolved, customer, scopes);
+    const result = await mint(resolved, customer, fields);
 
     if (result.failure) await onFailure?.(result.failure);
 

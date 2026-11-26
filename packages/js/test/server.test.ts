@@ -7,6 +7,7 @@ import {
   type CustomerSessionResult,
   type DoolaCustomer,
   type DoolaScope,
+  type DoolaServicePrices,
   type SessionHandlerOptions,
 } from '../src/server';
 
@@ -18,6 +19,11 @@ const CUSTOMER: DoolaCustomer = { email: 'founder@example.com', externalCustomer
 const MINTED = {
   payload: { accessToken: 'cs_live_abc', expiresAt: '2026-09-25T10:10:00Z', expiresIn: 600 },
   error: null,
+};
+
+const PRICES: DoolaServicePrices = {
+  currency: 'USD',
+  pricesInCents: { EinCreation: 9900, VariantEinExpedited: 14900 },
 };
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -42,8 +48,9 @@ function handler(
   apiKey: string | undefined = LIVE_KEY,
   onFailure?: SessionHandlerOptions['onFailure'],
   scopes?: SessionHandlerOptions['scopes'],
+  servicePrices?: SessionHandlerOptions['servicePrices'],
 ) {
-  return createSessionHandler({ apiKey, getCustomer, onFailure, scopes });
+  return createSessionHandler({ apiKey, getCustomer, onFailure, scopes, servicePrices });
 }
 
 function call(route = handler()) {
@@ -170,6 +177,31 @@ describe('createSessionHandler', () => {
     await call(route);
 
     expect(sentRequest().body).toEqual({ ...CUSTOMER, scopes: ['sdk:formation'] });
+  });
+
+  it('sends servicePrices for every request when set', async () => {
+    const route = handler(undefined, undefined, undefined, undefined, PRICES);
+
+    await call(route);
+    await call(route);
+
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(JSON.parse(String(init?.body))).toEqual({ ...CUSTOMER, servicePrices: PRICES });
+    }
+  });
+
+  it('keeps the prices it was created with when the caller later changes them', async () => {
+    const prices = { currency: 'USD', pricesInCents: { EinCreation: 9900 } };
+    const route = handler(undefined, undefined, undefined, undefined, prices);
+    prices.currency = 'EUR';
+    prices.pricesInCents.EinCreation = 1;
+
+    await call(route);
+
+    expect(sentRequest().body).toEqual({
+      ...CUSTOMER,
+      servicePrices: { currency: 'USD', pricesInCents: { EinCreation: 9900 } },
+    });
   });
 
   it('forwards the optional profile fields and nothing else from the customer', async () => {
@@ -478,6 +510,57 @@ describe('createCustomerSession', () => {
     await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, scopes: ['sdk:tax'] });
 
     expect(sentRequest().body).toEqual({ ...CUSTOMER, scopes: ['sdk:tax'] });
+  });
+
+  it('sends servicePrices when set, with scopes', async () => {
+    await createCustomerSession({
+      apiKey: LIVE_KEY,
+      customer: CUSTOMER,
+      scopes: ['sdk:formation'],
+      servicePrices: PRICES,
+    });
+
+    expect(sentRequest().body).toEqual({
+      ...CUSTOMER,
+      scopes: ['sdk:formation'],
+      servicePrices: PRICES,
+    });
+  });
+
+  it('sends empty prices as they are, which doola reads as none', async () => {
+    const servicePrices = { currency: 'USD', pricesInCents: {} };
+
+    await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, servicePrices });
+
+    expect(sentRequest().body).toEqual({ ...CUSTOMER, servicePrices });
+  });
+
+  it('forwards currency and pricesInCents and nothing else from the prices', async () => {
+    const servicePrices = { ...PRICES, note: 'internal' };
+
+    await createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, servicePrices });
+
+    expect(sentRequest().body).toEqual({ ...CUSTOMER, servicePrices: PRICES });
+  });
+
+  it("leaves the prices to doola's checks, and reports its 400 as a failure without a code", async () => {
+    const servicePrices = { currency: 'XYZ', pricesInCents: { EinCreation: -1.5 } };
+    fetchMock.mockResolvedValue(doolaError(400, 'E_VALIDATION_FAILED'));
+
+    await expect(
+      createCustomerSession({ apiKey: LIVE_KEY, customer: CUSTOMER, servicePrices }),
+    ).resolves.toEqual({
+      status: 400,
+      body: null,
+      failure: { reason: 'doola_error', doolaStatus: 400, doolaCode: 'E_VALIDATION_FAILED' },
+    });
+    expect(sentRequest().body).toEqual({ ...CUSTOMER, servicePrices });
+  });
+
+  it('types the price names, so a typo fails to compile', () => {
+    // @ts-expect-error EinExpedited is not a service name.
+    const typo: DoolaServicePrices = { currency: 'USD', pricesInCents: { EinExpedited: 100 } };
+    expect(typo).toBeDefined();
   });
 
   it("carries the code of doola's scope 403, so the loader stops the retry", async () => {
