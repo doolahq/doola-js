@@ -24,6 +24,27 @@ describe('projection', () => {
     },
   );
 
+  // It lands in the partner's `onServiceOrder`, which the contract says gets the two ids alone.
+  it('puts only the two ids on the wire for service-checkout-request, whatever it was handed', () => {
+    const leaky = {
+      companyId: 'c_1',
+      orderId: 'o_1',
+      items: ['EinCreation'],
+      amountInCents: 9900,
+      status: 'AWAITING_PAYMENT',
+    };
+
+    const sent = appEnvelope(
+      {
+        type: 'service-checkout-request',
+        payload: leaky as { companyId: string; orderId: string },
+      },
+      PROTOCOL_VERSION,
+    );
+
+    expect(sent.payload).toStrictEqual({ companyId: 'c_1', orderId: 'o_1' });
+  });
+
   it('forwards only the session fields the contract defines', () => {
     const fromPartnerRoute = { ...session, refreshToken: 'do-not-forward' };
 

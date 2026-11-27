@@ -1,7 +1,13 @@
-import type { CustomerSession as ContractSession, DoolaAuthError, DoolaLoadError } from '@doola/js';
+import type {
+  CustomerSession as ContractSession,
+  DoolaAuthError,
+  DoolaLoadError,
+  DoolaOptions,
+} from '@doola/js';
 import { describe, expect, it } from 'vitest';
 
 import type {
+  AppMessage,
   AuthErrorPayload,
   AuthErrorType,
   CustomerSession,
@@ -29,6 +35,12 @@ const sessionMatches: Exact<CustomerSession, ContractSession> = true;
 const authPayloadMatches: Exact<AuthErrorPayload, DoolaAuthError> = true;
 const loadPayloadMatches: Exact<LoadErrorPayload, DoolaLoadError> = true;
 
+// The loader hands this payload to the partner's `onServiceOrder` field by
+// field, so the wire and the callback must name the same two ids.
+type ServiceOrderPayload = Extract<AppMessage, { type: 'service-checkout-request' }>['payload'];
+type ServiceOrderEvent = Parameters<NonNullable<DoolaOptions['onServiceOrder']>>[0];
+const serviceOrderMatches: Exact<ServiceOrderPayload, ServiceOrderEvent> = true;
+
 /**
  * `PresentationMode` deliberately has no counterpart. The contract's
  * `Presentation.mode` is the partner's request — `fullScreen` or `auto` — while
@@ -45,6 +57,7 @@ describe('wire vocabulary', () => {
       sessionMatches,
       authPayloadMatches,
       loadPayloadMatches,
+      serviceOrderMatches,
     ]).not.toContain(false);
   });
 });

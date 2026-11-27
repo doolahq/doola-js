@@ -128,6 +128,13 @@ export type AppMessage =
    * request: start checkout for this company.
    */
   | { type: 'checkout-request'; payload: { companyId: string } }
+  /**
+   * The founder asking to pay for a service order they added on the
+   * dashboard, sent on Add and again on Resume. The two ids name the order on
+   * the partner's server and nothing else: what is owed is read there, from
+   * doola, so nothing here is anything a partner could charge by.
+   */
+  | { type: 'service-checkout-request'; payload: { companyId: string; orderId: string } }
   | { type: 'auth-error'; payload: AuthErrorPayload }
   | { type: 'load-error'; payload: LoadErrorPayload }
   | { type: 'loader-start'; payload: Record<string, never> };
@@ -142,6 +149,12 @@ export type LoaderMessage =
         locale?: string | undefined;
         appearance?: Appearance | undefined;
         presentation?: PresentationMode | undefined;
+        /**
+         * Whether the partner registered `onServiceOrder`. The loader sends it
+         * only as `true`; absent, or anything but `true`, means not registered,
+         * which is also what every loader older than the field says.
+         */
+        serviceOrders?: boolean | undefined;
       };
     }
   | { type: 'token'; payload: { session: CustomerSession } }

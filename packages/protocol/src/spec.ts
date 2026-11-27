@@ -144,6 +144,10 @@ export const APP_SPEC: SpecOf<AppMessage> = {
   'token-request': {},
   formed: { companyId: { accepts: isNonEmptyString } },
   'checkout-request': { companyId: { accepts: isNonEmptyString } },
+  'service-checkout-request': {
+    companyId: { accepts: isNonEmptyString },
+    orderId: { accepts: isNonEmptyString },
+  },
   'auth-error': {
     type: { accepts: isAuthErrorType },
     message: { accepts: isString },
@@ -166,6 +170,10 @@ export const LOADER_SPEC: SpecOf<LoaderMessage> = {
     // field keeps sending `init` without it. Why it rides on `init` at all is
     // docs/protocol.md.
     presentation: { accepts: optional(isPresentationMode) },
+    // Optional for the same reason, and the loader sends it only as `true`, so
+    // the init of a partner without `onServiceOrder` is the one every earlier
+    // loader sent (docs/protocol.md).
+    serviceOrders: { accepts: optional(isBoolean) },
   },
   token: { session },
   update: {

@@ -50,7 +50,7 @@ export type InstanceState = Pick<DoolaOptions, 'locale'>;
 /** The partner's handlers, typed by the contract so a contract change is a type error here. */
 export type InstanceHandlers = Pick<
   DoolaOptions,
-  'onAuthError' | 'onFormed' | 'onLoaderStart' | 'onLoadError'
+  'onAuthError' | 'onFormed' | 'onServiceOrder' | 'onLoaderStart' | 'onLoadError'
 >;
 
 export interface FrameConfig {
@@ -340,6 +340,10 @@ export class FrameController {
         protocol: this.protocol,
         presentation: this.presentationMode,
         locale: this.config.state.locale,
+        // `true` or absent, never `false`: a partner without the callback gets
+        // the init every earlier loader sent, and the app reads absent as "not
+        // registered" (docs/protocol.md).
+        serviceOrders: typeof this.config.handlers.onServiceOrder === 'function' || undefined,
       },
     });
   }
@@ -420,6 +424,16 @@ export class FrameController {
         // partner JS can be tampered with before their checkout reads it. A
         // future app field must not leak by accident.
         this.config.handlers.onFormed?.({ companyId: message.payload.companyId });
+        break;
+      // Its own destination, never onFormed: a service order is not a company
+      // to check out. Without the callback it is dropped, which an app that
+      // read `serviceOrders` never sends. The same projection rule as above:
+      // the two ids and nothing else (DoolaOptions.onServiceOrder).
+      case 'service-checkout-request':
+        this.config.handlers.onServiceOrder?.({
+          companyId: message.payload.companyId,
+          orderId: message.payload.orderId,
+        });
         break;
       case 'auth-error':
         this.config.handlers.onAuthError(message.payload);

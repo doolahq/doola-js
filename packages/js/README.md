@@ -170,6 +170,11 @@ const doola = await loadDoola({
   // The customer submitted the wizard. Start your checkout for this company.
   // Optional in the types, but required for formation: create() throws without it.
   onFormed: ({ companyId }) => startCheckout(companyId),
+
+  // The customer added a service on their company's dashboard, such as an EIN. Start your
+  // checkout for this order. Optional: without it the dashboard offers no services to add.
+  // Fires again for the same order on Resume, so keep it idempotent.
+  onServiceOrder: ({ companyId, orderId }) => startServiceCheckout(companyId, orderId),
 });
 
 // Mount into an element on your page: <div id="doola"></div>
@@ -241,6 +246,90 @@ Its payment screen does not watch for your confirmation, so only a new element s
 their company. Each `create()` is a separate iframe, so never append a second one beside the old.
 From then on, the Partner API's [webhooks](https://docs.doola.com/api/webhooks) tell you how the
 formation is going.
+
+**Services added on the dashboard.** `onServiceOrder` hands you a company id and an order id and
+nothing else, for the same reason. doola has created a service order awaiting payment, and nothing
+starts until your server confirms it. When your checkout for it starts:
+
+1. **Read the order on your server, right before you charge.** Never start a charge on an order
+   that is not `AWAITING_PAYMENT`. One that reads `CANCELLED` was cancelled by the founder, expired,
+   or can no longer be delivered by doola.
+2. **Check the company belongs to the signed-in customer**, as for the formation above.
+3. **Charge the sum of the prices of its `items`**, at the prices the session showed. `items` is
+   `EinCreation` (an EIN), `EinCreation` and `VariantEinExpedited` (an Expedited EIN), or
+   `VariantEinExpedited` alone (an upgrade of a Standard EIN). Never read an item or a price from
+   the browser.
+4. **Charge once per order id.** `onServiceOrder` fires again for the same order when the founder
+   clicks Resume, and a second tab can reach your checkout too. Keep one payment record per order
+   id in your own store, and give each charge attempt its own idempotency key, as
+   [Take payment](https://docs.doola.com/sdk/payments) shows for the formation.
+5. **Confirm after the charge succeeds.** If a charge went through, or might have, and the order is
+   not `CONFIRMED`, look the charge up at your payment provider and confirm it. Never charge again.
+   doola honours a confirmed payment even when the order was cancelled or expired meanwhile. A 400,
+   409 or 422 on confirm means doola can no longer deliver the service: refund the founder. Don't
+   wait for the founder to come back: check on a schedule, and when `company_service_order_cancelled`
+   arrives for an order you charged.
+6. **Cancel an order you will not take payment for**, so the founder's dashboard stops showing it
+   as awaiting payment.
+
+<!-- example: service-order after confirm-payment -->
+
+```ts
+import type { DoolaPricedService } from '@doola/js/server';
+
+type ServiceOrder = {
+  orderId: string;
+  doolaCompanyId: string;
+  items: DoolaPricedService[];
+  status: 'AWAITING_PAYMENT' | 'CONFIRMED' | 'CANCELLED';
+};
+
+function orderPath(companyId: string, orderId: string): string {
+  const company = encodeURIComponent(companyId);
+  return `/v1/partner/companies/${company}/service-orders/${encodeURIComponent(orderId)}`;
+}
+
+// On your server, after point 2's check, right before you charge. Start a charge only while it
+// reads AWAITING_PAYMENT.
+async function readServiceOrder(companyId: string, orderId: string): Promise<ServiceOrder> {
+  const r = await fetch(`${DOOLA_API}${orderPath(companyId, orderId)}`, {
+    headers: { authorization: doolaKey() },
+  });
+  if (!r.ok) throw new Error(`doola service order read failed with ${r.status}`);
+
+  return (await r.json()).payload;
+}
+
+async function doolaPost(path: string, body?: object): Promise<void> {
+  const r = await fetch(`${DOOLA_API}${path}`, {
+    method: 'POST',
+    headers: { authorization: doolaKey(), 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  });
+
+  // The caller reads the status: point 5 says what it means on confirm.
+  if (!r.ok) throw Object.assign(new Error(`doola ${path} failed`), { status: r.status });
+}
+
+// On your server, after the charge succeeds. A repeat changes nothing, so it is safe to retry.
+async function confirmServiceOrder(
+  companyId: string,
+  orderId: string,
+  paymentReference: string,
+): Promise<void> {
+  await doolaPost(`${orderPath(companyId, orderId)}/payment-confirmed`, {
+    partnerReference: paymentReference,
+  });
+}
+
+// On your server, when you will not take payment for the order.
+async function cancelServiceOrder(companyId: string, orderId: string): Promise<void> {
+  await doolaPost(`${orderPath(companyId, orderId)}/cancel`);
+}
+```
+
+Confirming also cancels any other order of that company for the same service. A confirmed order
+cannot be cancelled.
 
 Edge cases, refunds and reconciliation: [Take payment](https://docs.doola.com/sdk/payments).
 

@@ -77,6 +77,8 @@ async function mount(
     onAuthErrorThrows?: boolean;
     product?: string;
     withoutOnFormed?: boolean;
+    /** Registers the partner's onServiceOrder, which records its events like the others. */
+    withOnServiceOrder?: boolean;
   } = {},
 ): Promise<void> {
   await page.setViewportSize(options.viewport ?? WIDE);
@@ -91,6 +93,7 @@ async function mount(
       onAuthErrorThrows,
       product,
       withoutOnFormed,
+      withOnServiceOrder,
     }) => {
       const w = window as unknown as PartnerWindow;
       w.__events = [];
@@ -124,6 +127,11 @@ async function mount(
         ...(withoutOnFormed
           ? {}
           : { onFormed: (event) => w.__events.push({ handler: 'onFormed', event }) }),
+        ...(withOnServiceOrder
+          ? {
+              onServiceOrder: (event) => w.__events.push({ handler: 'onServiceOrder', event }),
+            }
+          : {}),
         onLoadError: (error) => w.__events.push({ handler: 'onLoadError', error }),
         onLoaderStart: () => w.__events.push({ handler: 'onLoaderStart' }),
       };
@@ -142,6 +150,7 @@ async function mount(
       onAuthErrorThrows: options.onAuthErrorThrows ?? false,
       product: options.product,
       withoutOnFormed: options.withoutOnFormed ?? false,
+      withOnServiceOrder: options.withOnServiceOrder ?? false,
     },
   );
 }
@@ -305,6 +314,29 @@ test('init carries the negotiated protocol and the presentation mode', async ({ 
   expect(payload.protocol).toBe(PROTOCOL_VERSION);
   expect(payload.presentation).toBe('inline');
   expect((payload.session as Record<string, unknown>).accessToken).toBe('cs_harness');
+});
+
+test('without onServiceOrder, init is the one every earlier loader sent', async ({ page }) => {
+  await mount(page);
+  const frame = await handshake(page);
+
+  const init = (await received(frame)).find((m) => m.data.type === 'init');
+
+  // The exact keys: `serviceOrders: false` would also read as "not registered",
+  // but it would be a change to the init of every partner who did nothing.
+  expect(Object.keys(init?.data.payload as object).sort()).toStrictEqual([
+    'presentation',
+    'protocol',
+    'session',
+  ]);
+});
+
+test('with onServiceOrder, init says the partner registered it', async ({ page }) => {
+  await mount(page, { withOnServiceOrder: true });
+  const frame = await handshake(page);
+
+  const init = (await received(frame)).find((m) => m.data.type === 'init');
+  expect((init?.data.payload as Record<string, unknown>).serviceOrders).toBe(true);
 });
 
 test('a ready sent again after a failed first mint mints afresh and gets init', async ({
@@ -581,6 +613,32 @@ test('without onFormed, init succeeds and only a formation create() throws', asy
   expect(created).toBe('DOOLA-EMBED');
 });
 
+test('an onServiceOrder that is not a function throws at init, rather than hiding the services', async ({
+  page,
+}) => {
+  await page.goto(harness.partnerOrigin);
+
+  const thrown = await page.evaluate((sdkOrigin) => {
+    const w = window as unknown as PartnerWindow;
+    try {
+      w.Doola!.init({
+        publishableKey: 'pk_test_harness',
+        origin: sdkOrigin,
+        fetchAccessToken: () => Promise.resolve({ accessToken: 'cs_harness', expiresIn: 3600 }),
+        onAuthError: () => {},
+        onFormed: () => {},
+        // A JavaScript partner's mistake, which the types would have caught.
+        onServiceOrder: 'startServiceCheckout' as unknown as () => void,
+      });
+      return null;
+    } catch (error) {
+      return (error as Error).message;
+    }
+  }, harness.sdkOrigin);
+
+  expect(thrown).toBe('doola: onServiceOrder must be a function.');
+});
+
 test('a mint refused for its scope is terminal, and reported as a load error too', async ({
   page,
 }) => {
@@ -707,6 +765,116 @@ for (const type of ['formed', 'checkout-request'] as const) {
     expect((await eventsOf(page, 'onFormed'))[0]?.event).toEqual({ companyId: 'cmp_88' });
   });
 }
+
+const serviceOrder = {
+  v: PROTOCOL_VERSION,
+  type: 'service-checkout-request',
+  payload: { companyId: 'cmp_88', orderId: 'ord_7' },
+};
+
+test('service-checkout-request reaches onServiceOrder with the two ids and nothing else', async ({
+  page,
+}) => {
+  await mount(page, { withOnServiceOrder: true });
+  const frame = await handshake(page);
+
+  await sendFromApp(frame, {
+    ...serviceOrder,
+    payload: {
+      ...serviceOrder.payload,
+      items: ['EinCreation'],
+      amountInCents: 9900,
+      internal: 'must not leak',
+    },
+  });
+
+  await expect.poll(async () => (await eventsOf(page, 'onServiceOrder')).length).toBe(1);
+  expect((await eventsOf(page, 'onServiceOrder'))[0]?.event).toEqual({
+    companyId: 'cmp_88',
+    orderId: 'ord_7',
+  });
+  expect(await eventsOf(page, 'onFormed'), 'a service order is not a formation').toHaveLength(0);
+
+  // Resume sends the same order again, and it is handed over again.
+  await sendFromApp(frame, serviceOrder);
+  await expect.poll(async () => (await eventsOf(page, 'onServiceOrder')).length).toBe(2);
+});
+
+test('without onServiceOrder, a service-checkout-request is dropped, never sent to onFormed', async ({
+  page,
+}) => {
+  const errors: Error[] = [];
+  page.on('pageerror', (error) => errors.push(error));
+
+  await mount(page);
+  const frame = await handshake(page);
+
+  await sendFromApp(frame, serviceOrder);
+  await page.waitForTimeout(250);
+
+  expect(await eventsOf(page, 'onFormed')).toHaveLength(0);
+  expect(errors).toHaveLength(0);
+
+  // Still healthy: the frame's next message is handled as before.
+  await sendFromApp(frame, { v: PROTOCOL_VERSION, type: 'formed', payload: { companyId: 'c_1' } });
+  await expect.poll(async () => (await eventsOf(page, 'onFormed')).length).toBe(1);
+});
+
+test('a malformed service-checkout-request is dropped, not thrown on', async ({ page }) => {
+  await mount(page, { withOnServiceOrder: true });
+  const frame = await handshake(page);
+
+  await sendFromApp(frame, { ...serviceOrder, payload: { companyId: 'cmp_88' } });
+  await sendFromApp(frame, { ...serviceOrder, payload: { companyId: 'cmp_88', orderId: '' } });
+  await sendFromApp(frame, { ...serviceOrder, payload: { orderId: 'ord_7' } });
+  await page.waitForTimeout(250);
+
+  expect(await eventsOf(page, 'onServiceOrder')).toHaveLength(0);
+
+  await sendFromApp(frame, serviceOrder);
+  await expect.poll(async () => (await eventsOf(page, 'onServiceOrder')).length).toBe(1);
+});
+
+test('a service-checkout-request from a frame the loader did not mount is dropped', async ({
+  page,
+}) => {
+  await mount(page, { withOnServiceOrder: true });
+  await handshake(page);
+
+  // Same SDK origin, different window: only the source check stops it.
+  await page.evaluate((src) => {
+    const rogue = document.createElement('iframe');
+    rogue.src = src;
+    rogue.name = 'rogue';
+    document.body.appendChild(rogue);
+  }, `${harness.sdkOrigin}/rogue`);
+  await expect.poll(() => page.frame({ name: 'rogue' })?.url()).toContain('/rogue');
+  const rogue = page.frame({ name: 'rogue' })!;
+  await rogue.waitForFunction(() => typeof (window as unknown as AppWindow).__send === 'function');
+
+  await sendFromApp(rogue, serviceOrder);
+  await page.waitForTimeout(250);
+
+  expect(await eventsOf(page, 'onServiceOrder')).toHaveLength(0);
+});
+
+test('a service-checkout-request from the mounted frame on another origin is dropped', async ({
+  page,
+}) => {
+  await mount(page, { withOnServiceOrder: true });
+  const frame = await handshake(page);
+
+  // The mounted window, navigated off the SDK origin: only the origin check stops it.
+  const hijack = `${harness.partnerOrigin}/hijacked`;
+  await page.route(hijack, (route) => route.fulfill({ contentType: 'text/html', body: APP_PAGE }));
+  await frame.goto(hijack);
+  await frame.waitForFunction(() => typeof (window as unknown as AppWindow).__send === 'function');
+
+  await sendFromApp(frame, serviceOrder);
+  await page.waitForTimeout(250);
+
+  expect(await eventsOf(page, 'onServiceOrder')).toHaveLength(0);
+});
 
 test('a malformed checkout-request is dropped, not thrown on', async ({ page }) => {
   await mount(page);

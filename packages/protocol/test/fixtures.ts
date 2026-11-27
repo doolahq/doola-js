@@ -14,6 +14,10 @@ export const APP_MESSAGES: { [K in AppMessage['type']]: Extract<AppMessage, { ty
   'token-request': { type: 'token-request', payload: {} },
   formed: { type: 'formed', payload: { companyId: 'c_1' } },
   'checkout-request': { type: 'checkout-request', payload: { companyId: 'c_1' } },
+  'service-checkout-request': {
+    type: 'service-checkout-request',
+    payload: { companyId: 'c_1', orderId: 'o_1' },
+  },
   'auth-error': { type: 'auth-error', payload: { type: 'mint_failed', message: 'x' } },
   'load-error': { type: 'load-error', payload: { type: 'api_error', message: 'x' } },
   'loader-start': { type: 'loader-start', payload: {} },
@@ -24,7 +28,13 @@ export const LOADER_MESSAGES: {
 } = {
   init: {
     type: 'init',
-    payload: { session, protocol: 1, locale: 'en', presentation: 'fullScreen' },
+    payload: {
+      session,
+      protocol: 1,
+      locale: 'en',
+      presentation: 'fullScreen',
+      serviceOrders: true,
+    },
   },
   token: { type: 'token', payload: { session } },
   update: {

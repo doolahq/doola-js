@@ -44,6 +44,9 @@ function init(options: DoolaOptions): Doola {
       'doola: onAuthError is required. When your own user session expires, only your page can send the user back to your login.',
     );
   }
+  // Without this, a value that is not a function quietly hides the dashboard's services.
+  if (options.onServiceOrder !== undefined && typeof options.onServiceOrder !== 'function')
+    throw new Error('doola: onServiceOrder must be a function.');
 
   // The key always resolves the environment — even for CNAME partners,
   // whose `origin` overrides only where the app is served from — so the
@@ -57,6 +60,7 @@ function init(options: DoolaOptions): Doola {
   const handlers: InstanceHandlers = {
     onAuthError,
     onFormed,
+    onServiceOrder: options.onServiceOrder,
     onLoaderStart: options.onLoaderStart,
     onLoadError: options.onLoadError,
   };
