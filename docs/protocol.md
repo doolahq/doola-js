@@ -224,7 +224,9 @@ this protocol:
   it shows wholesale. No `appearance` means doola's own palette; no `preview`
   means `onboarding`.
 - **`preview` names the surface**: `onboarding` (the formation wizard) or
-  `dashboard`. Any other string is shown as `onboarding` rather than failing the
+  `dashboard` for formation, and `tax-onboarding` (the onboarding steps),
+  `tax-questionnaire` or `tax-status` (the tax status card) for the tax module.
+  Any other string is shown as `onboarding` rather than failing the
   message, so a portal that learns a surface before the app does still repaints
   the branding. A value that is not a string is a malformed payload, and the
   whole `update` is dropped with it, branding included. The field is additive:

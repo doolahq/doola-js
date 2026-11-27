@@ -159,7 +159,7 @@ export function parseLoaderMessage(data: unknown): LoaderMessage | null;
 export type PresentationMode = 'inline' | 'fullScreen';
 
 // @public
-export type PreviewSurface = 'onboarding' | 'dashboard';
+export type PreviewSurface = 'onboarding' | 'dashboard' | 'tax-onboarding' | 'tax-questionnaire' | 'tax-status';
 
 // @public
 export const PROTOCOL_VERSION = 1;
