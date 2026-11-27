@@ -208,6 +208,33 @@ export interface DoolaOptions {
    */
   onFormed?: ((event: { companyId: string }) => void) | undefined;
 
+  /**
+   * The payment handoff for a service the founder adds on their company's
+   * dashboard, such as an EIN. Optional: without it the dashboard offers no
+   * services, so no founder is left with an order nobody can take payment
+   * for.
+   *
+   * Fires when the founder clicks Add. doola has then created a service
+   * order awaiting payment. Nothing starts until the partner's server
+   * confirms payment with
+   * POST /v1/partner/companies/{companyId}/service-orders/{orderId}/payment-confirmed.
+   *
+   * Carries ONLY the two ids, for the reason `onFormed` carries only one.
+   * The partner's server reads the order with
+   * GET /v1/partner/companies/{companyId}/service-orders/{orderId} right
+   * before charging, charges the sum of the prices of its `items`, and
+   * never starts a charge on an order that is not `AWAITING_PAYMENT`.
+   *
+   * May fire more than once for the same order, and handlers must be
+   * idempotent: the founder can click Resume on an order awaiting payment,
+   * and a second tab can do the same. Charge once per `orderId`: keep one
+   * payment record per order id and an idempotency key per charge attempt.
+   * A charge that went through, or might have, is looked up at the payment
+   * provider and confirmed, never charged again: doola honours a confirmed
+   * payment even when the order was cancelled or expired meanwhile.
+   */
+  onServiceOrder?: ((event: { companyId: string; orderId: string }) => void) | undefined;
+
   /** Fired the first time any UI (including a loading state) is visible inside the frame. */
   onLoaderStart?: (() => void) | undefined;
 

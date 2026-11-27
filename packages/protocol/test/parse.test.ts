@@ -109,6 +109,14 @@ describe('parseAppMessage payload rules', () => {
     ['height must not be negative', 'resize', { height: -1 }],
     ['companyId must be present', 'formed', {}],
     ['companyId must be a non-empty string', 'formed', { companyId: '' }],
+    ['a service order needs its order id', 'service-checkout-request', { companyId: 'c_1' }],
+    ['a service order needs its company id', 'service-checkout-request', { orderId: 'o_1' }],
+    [
+      'the order id must be a non-empty string',
+      'service-checkout-request',
+      { companyId: 'c_1', orderId: '' },
+    ],
+    ['the order id must be a string', 'service-checkout-request', { companyId: 'c_1', orderId: 7 }],
     ['auth-error type must be a contract case', 'auth-error', { type: 'nope', message: 'x' }],
     ['auth-error message must be a string', 'auth-error', { type: 'mint_failed', message: 42 }],
     ['load-error message must be a string', 'load-error', { type: 'api_error', message: 42 }],
@@ -143,6 +151,8 @@ describe('parseLoaderMessage payload rules', () => {
       { reason: 'vibes', message: 'x', retryable: true },
     ],
     ['mode is not a resolved mode', 'presentation', { mode: 'auto' }],
+    ['init serviceOrders is a string', 'init', { session, protocol: 1, serviceOrders: 'true' }],
+    ['init serviceOrders is null', 'init', { session, protocol: 1, serviceOrders: null }],
     [
       'init presentation is not a resolved mode',
       'init',

@@ -78,6 +78,8 @@ export interface DoolaOptions {
 
     onLoaderStart?: (() => void) | undefined;
 
+    onServiceOrder?: ((event: { companyId: string; orderId: string }) => void) | undefined;
+
     origin?: string | undefined;
 
     // (undocumented)

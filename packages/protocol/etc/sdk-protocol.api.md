@@ -46,6 +46,19 @@ export type AppMessage = {
     payload: {
         companyId: string;
     };
+}
+/**
+* The founder asking to pay for a service order they added on the
+* dashboard, sent on Add and again on Resume. The two ids name the order on
+* the partner's server and nothing else: what is owed is read there, from
+* doola, so nothing here is anything a partner could charge by.
+*/
+| {
+    type: 'service-checkout-request';
+    payload: {
+        companyId: string;
+        orderId: string;
+    };
 } | {
     type: 'auth-error';
     payload: AuthErrorPayload;
@@ -107,6 +120,7 @@ export type LoaderMessage = {
         locale?: string | undefined;
         appearance?: Appearance | undefined;
         presentation?: PresentationMode | undefined;
+        serviceOrders?: boolean | undefined;
     };
 } | {
     type: 'token';

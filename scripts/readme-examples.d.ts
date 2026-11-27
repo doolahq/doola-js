@@ -19,4 +19,5 @@ declare const app: {
 
 declare function getSignedInUser(request: unknown): Promise<{ id: string; email: string } | null>;
 declare function startCheckout(companyId: string): void;
+declare function startServiceCheckout(companyId: string, orderId: string): void;
 declare function showSupportMessage(): void;
