@@ -188,18 +188,22 @@ describe('parseLoaderMessage payload rules', () => {
     ).not.toBeNull();
   });
 
-  it.each(['onboarding', 'dashboard', 'a-newer-surface'])(
-    'carries the preview surface %s, whatever the name',
-    (preview) => {
-      const update = parseLoaderMessage({
-        v: PROTOCOL_VERSION,
-        type: 'update',
-        payload: { appearance: { brand: '#F9C800' }, preview },
-      });
+  it.each([
+    'onboarding',
+    'dashboard',
+    'tax-onboarding',
+    'tax-questionnaire',
+    'tax-status',
+    'a-newer-surface',
+  ])('carries the preview surface %s, whatever the name', (preview) => {
+    const update = parseLoaderMessage({
+      v: PROTOCOL_VERSION,
+      type: 'update',
+      payload: { appearance: { brand: '#F9C800' }, preview },
+    });
 
-      expect(update?.type === 'update' && update.payload.preview).toBe(preview);
-    },
-  );
+    expect(update?.type === 'update' && update.payload.preview).toBe(preview);
+  });
 
   it('accepts a session that carries expiresAt', () => {
     const payload = {

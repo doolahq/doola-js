@@ -102,9 +102,12 @@ export type Appearance = Record<string, unknown>;
 
 /**
  * The surfaces the portal's branding preview can show, one at a time
- * (docs/protocol.md, "The preview peer").
+ * (docs/protocol.md, "The preview peer"). `onboarding` and `dashboard` are
+ * formation's. The `tax-` ones are the tax module's onboarding steps, its
+ * questionnaire and its status card.
  */
-export type PreviewSurface = 'onboarding' | 'dashboard';
+export type PreviewSurface =
+  'onboarding' | 'dashboard' | 'tax-onboarding' | 'tax-questionnaire' | 'tax-status';
 
 /**
  * Forwarded verbatim to the partner's `onAuthError` / `onLoadError`, so these
