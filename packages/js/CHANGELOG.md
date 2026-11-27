@@ -1,5 +1,27 @@
 # @doola/js
 
+## 0.4.0
+
+### Minor Changes
+
+- f9ac088: `create()` takes an optional `product`, `'formation'` (the default) or `'tax'`, so a partner mounts tax filing with the same package, keys and session route. `create()` with no argument is unchanged, and the formation frame URL is byte-for-byte what it was. An unknown product throws at `create()`.
+  
+  `onFormed` is now optional in the types. The loader checks it when a formation component is created, with the same message as before, and never for tax.
+  
+  `createCustomerSession` and `createSessionHandler` take an optional `scopes` (`sdk:formation`, `sdk:tax` or both). Omitted, the field is not sent and the mint body is unchanged. The helpers now forward doola's code on a 403 `E_SCOPE_NOT_ENTITLED`, and on the first mint the loader treats it as terminal: no Try again, and `onLoadError` with `invalid_request_error` alongside `onAuthError`. On a renewal it stays a retryable `renewal_failed`. Every other 403 still answers without a code.
+- 438088c: `createCustomerSession` and `createSessionHandler` take an optional `servicePrices` (`currency` and `pricesInCents`) and send it on the customer session, in place of the prices set in the Partner Portal for that session. If you send prices, they are the complete price list for that customer: a service you leave out is not offered. If you send none, the portal's prices apply. A list that prices nothing counts as none, so to offer none of the priced services, turn them off in the Partner Portal. Amounts are whole numbers in the currency's ISO 4217 minor unit. Omitted, the field is not sent and the mint body is unchanged. `createSessionHandler` reads the prices once, when it is created.
+  
+  The helpers send the prices as they are; doola checks them and refuses a mistake with a 400 `E_VALIDATION_FAILED`. A failure now carries doola's per-field errors as `doolaFields` (each field's `code` and `message`), for your logs only: the session route never sends it to the browser.
+  
+  New types `DoolaServicePrices` and `DoolaPricedService` (`EinCreation`, `VariantEinExpedited`) name the prices object and the services it prices.
+- 5ea434a: `createCustomerSession` and `createSessionHandler` now forward doola's code on a 400 `E_VALIDATION_FAILED`, as they do for the scope 403: the session route answers the 400 with `{ code: 'E_VALIDATION_FAILED' }`. The code only: which field doola refused stays in `failure.doolaFields`, for your server log. Every other 400 still answers without a code.
+  
+  On the first session the loader treats that 400 as final, like the scope 403: the frame offers no Try again, and `onLoadError` gets `invalid_request_error` alongside `onAuthError`'s `mint_failed`, with a message that names no field. A later `ready` or mount still fetches again, so keep both handlers idempotent. On a renewal it stays a retryable `renewal_failed`: while the frame holds a live token, the app keeps working until it expires. A founder who comes back after the session went stale is minted as a renewal too, so a refusal then is a retryable `renewal_failed` with no token behind it; that is unchanged here.
+  
+  `onLoadError` now runs even when the partner's `onAuthError` throws, for the scope 403 too; the `onAuthError` error still propagates as before.
+  
+  The loader is served from js.doola.com, so this reaches every route that forwards doola's code on a 400 as soon as the loader deploys, whatever its `@doola/js` version: a hand-written route that already forwards `error.code` on every error changes too. A route that forwards no code on a 400, such as one built with an older `@doola/js`, keeps the retry.
+
 ## 0.3.0
 
 ### Minor Changes
